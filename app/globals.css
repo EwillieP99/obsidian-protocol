@@ -1,0 +1,299 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --void: 5 6 10;
+  --cyan-neon: 0 249 255;
+  --magenta-neon: 255 0 170;
+  --toxic: 157 0 255;
+}
+
+html, body {
+  height: 100%;
+  background: rgb(var(--void));
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+* { box-sizing: border-box; }
+
+::selection {
+  background: rgba(0, 249, 255, 0.3);
+  color: #ffffff;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0); }
+::-webkit-scrollbar-thumb { background: rgba(0, 249, 255, 0.25); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0, 249, 255, 0.5); }
+
+/* ============================================================ */
+/*  NEON UTILITY CLASSES                                          */
+/* ============================================================ */
+
+@layer components {
+  .panel {
+    @apply bg-void/80 border border-cyan-neon/25 backdrop-blur-md;
+    box-shadow:
+      inset 0 0 0 1px rgba(0, 249, 255, 0.05),
+      0 0 24px rgba(0, 249, 255, 0.08);
+  }
+
+  .panel-magenta {
+    @apply bg-void/80 border border-magenta-neon/30 backdrop-blur-md;
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 0, 170, 0.06),
+      0 0 24px rgba(255, 0, 170, 0.1);
+  }
+
+  .terminal {
+    font-family: var(--font-share-tech), ui-monospace, monospace;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .neon-text-cyan {
+    color: #aef9ff;
+    text-shadow:
+      0 0 4px rgba(0, 249, 255, 0.6),
+      0 0 12px rgba(0, 249, 255, 0.4);
+  }
+
+  .neon-text-magenta {
+    color: #ff99dd;
+    text-shadow:
+      0 0 4px rgba(255, 0, 170, 0.65),
+      0 0 12px rgba(255, 0, 170, 0.4);
+  }
+
+  .neon-text-toxic {
+    color: #d9a3ff;
+    text-shadow:
+      0 0 4px rgba(157, 0, 255, 0.7),
+      0 0 12px rgba(157, 0, 255, 0.4);
+  }
+
+  .pulse-dot {
+    @apply inline-block w-1.5 h-1.5 rounded-full bg-signal-green;
+    box-shadow: 0 0 8px #39ff14;
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+
+  .btn-neon {
+    @apply terminal text-xs px-3 py-1.5 border transition-all duration-150 select-none;
+    @apply bg-void/60 border-cyan-neon/40 text-cyan-glow;
+    @apply hover:bg-cyan-neon/10 hover:border-cyan-neon hover:text-white;
+    @apply active:scale-95;
+  }
+
+  .btn-neon[data-active='true'] {
+    @apply bg-cyan-neon/15 border-cyan-neon text-white;
+    box-shadow:
+      inset 0 0 0 1px rgba(0, 249, 255, 0.4),
+      0 0 14px rgba(0, 249, 255, 0.45);
+  }
+
+  .btn-magenta {
+    @apply terminal text-xs px-3 py-1.5 border transition-all duration-150 select-none;
+    @apply bg-void/60 border-magenta-neon/45 text-magenta-glow;
+    @apply hover:bg-magenta-neon/10 hover:border-magenta-neon hover:text-white;
+    @apply active:scale-95;
+  }
+
+  .btn-magenta[data-active='true'] {
+    @apply bg-magenta-neon/15 border-magenta-neon text-white;
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 0, 170, 0.4),
+      0 0 14px rgba(255, 0, 170, 0.45);
+  }
+
+  .data-strip {
+    background: repeating-linear-gradient(
+      90deg,
+      rgba(0, 249, 255, 0.0) 0px,
+      rgba(0, 249, 255, 0.0) 6px,
+      rgba(0, 249, 255, 0.18) 6px,
+      rgba(0, 249, 255, 0.18) 7px
+    );
+  }
+
+  /* Animated data-stream accent — used in the keyboard shortcuts overlay edges. */
+  .data-stream-accent {
+    background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(0, 249, 255, 0) 10%,
+      rgba(0, 249, 255, 0.95) 50%,
+      rgba(0, 249, 255, 0) 90%,
+      transparent 100%);
+    background-size: 200% 100%;
+    animation: data-stream-slide 3.6s linear infinite;
+  }
+  @keyframes data-stream-slide {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -50% 0; }
+  }
+
+  /* Status-bar background data-stream pulse — appears as a slow rolling
+     gradient under the bottom HUD when scene is active. */
+  .status-stream {
+    position: relative;
+    overflow: hidden;
+  }
+  .status-stream::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(0, 249, 255, 0.0) 30%,
+      rgba(0, 249, 255, 0.05) 50%,
+      rgba(0, 249, 255, 0.0) 70%,
+      transparent 100%);
+    background-size: 240% 100%;
+    animation: data-stream-slide 11s linear infinite;
+    opacity: 0.85;
+  }
+
+  /* HUD background data-stream — overlays the entire HUD subtly when active. */
+  .hud-stream {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 9;
+    overflow: hidden;
+    opacity: 0.55;
+  }
+  .hud-stream::before {
+    content: '';
+    position: absolute;
+    inset: -10%;
+    background-image:
+      linear-gradient(180deg, rgba(0, 249, 255, 0) 0%, rgba(0, 249, 255, 0.05) 45%, rgba(0, 249, 255, 0) 90%),
+      linear-gradient(90deg, rgba(255, 0, 170, 0) 60%, rgba(255, 0, 170, 0.04) 75%, rgba(255, 0, 170, 0) 90%);
+    animation: hud-stream-drift 22s linear infinite;
+  }
+  .hud-stream::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: repeating-linear-gradient(
+      90deg,
+      rgba(0, 249, 255, 0) 0px,
+      rgba(0, 249, 255, 0) 96px,
+      rgba(0, 249, 255, 0.05) 96px,
+      rgba(0, 249, 255, 0.05) 97px
+    );
+    mix-blend-mode: screen;
+    animation: hud-stream-shift 14s linear infinite;
+  }
+  @keyframes hud-stream-drift {
+    0% { transform: translate(0, 0); }
+    50% { transform: translate(-2%, -2%); }
+    100% { transform: translate(0, 0); }
+  }
+  @keyframes hud-stream-shift {
+    0% { background-position: 0 0; }
+    100% { background-position: 96px 0; }
+  }
+
+  /* Loading veil */
+  .loading-veil {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, rgba(5, 6, 10, 0.6) 0%, rgba(5, 6, 10, 0.92) 100%);
+    backdrop-filter: blur(2px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Subtle CRT scanline overlay applied to the whole app via .crt-overlay */
+  .crt-overlay::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image: repeating-linear-gradient(
+      0deg,
+      rgba(0, 0, 0, 0.06) 0px,
+      rgba(0, 0, 0, 0.06) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+    z-index: 60;
+    mix-blend-mode: multiply;
+  }
+  .crt-overlay::after {
+    content: '';
+    position: fixed;
+    inset: -100%;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.55) 100%);
+    z-index: 60;
+  }
+
+  .corner-bracket {
+    position: relative;
+  }
+  .corner-bracket::before,
+  .corner-bracket::after {
+    content: '';
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border-color: rgba(0, 249, 255, 0.7);
+    pointer-events: none;
+  }
+  .corner-bracket::before {
+    top: -2px; left: -2px;
+    border-top: 1px solid; border-left: 1px solid;
+  }
+  .corner-bracket::after {
+    bottom: -2px; right: -2px;
+    border-bottom: 1px solid; border-right: 1px solid;
+  }
+}
+
+/* Glitch text effect (used in boot screen, anomaly alerts) */
+.glitch {
+  position: relative;
+  color: #aef9ff;
+}
+.glitch::before,
+.glitch::after {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+.glitch::before {
+  color: #ff00aa;
+  transform: translate(1px, 0);
+  animation: glitch-1 2s infinite linear;
+  clip-path: inset(0 0 60% 0);
+}
+.glitch::after {
+  color: #00f9ff;
+  transform: translate(-1px, 0);
+  animation: glitch-2 2.4s infinite linear;
+  clip-path: inset(60% 0 0 0);
+}
+@keyframes glitch-1 {
+  0%, 92%, 100% { transform: translate(1px, 0); }
+  93% { transform: translate(-3px, 1px); }
+  95% { transform: translate(2px, -1px); }
+}
+@keyframes glitch-2 {
+  0%, 92%, 100% { transform: translate(-1px, 0); }
+  94% { transform: translate(3px, -1px); }
+  96% { transform: translate(-2px, 1px); }
+}
