@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useUIStore } from '@/stores/uiStore';
+import { useEngine } from '@/hooks/useEngine';
 
 const BOOT_LINES = [
   '> NEXUS-OS v8.41.2 // OBSIDIAN PROTOCOL',
@@ -24,23 +25,37 @@ const BOOT_LINES = [
 
 export function BootSequence() {
   const setBooted = useUIStore((s) => s.setBooted);
+  const { ready: engineReady } = useEngine();
   const [visible, setVisible] = useState<number>(0);
   const [done, setDone] = useState(false);
+  const [animDone, setAnimDone] = useState(false);
+  // Guard against double-firing setBooted across the two gating effects.
+  const bootedFired = useRef(false);
 
+  // Phase 1: type out the boot lines, then mark animation complete. We hold
+  // back setBooted until BOTH the cinematic finished AND the engine is ready,
+  // so future-phase worker spin-up never races the HUD reveal.
   useEffect(() => {
     const id = setInterval(() => {
       setVisible((v) => {
         if (v >= BOOT_LINES.length) {
           clearInterval(id);
           setTimeout(() => setDone(true), 320);
-          setTimeout(() => setBooted(true), 900);
+          setTimeout(() => setAnimDone(true), 900);
           return v;
         }
         return v + 1;
       });
     }, 110);
     return () => clearInterval(id);
-  }, [setBooted]);
+  }, []);
+
+  useEffect(() => {
+    if (animDone && engineReady && !bootedFired.current) {
+      bootedFired.current = true;
+      setBooted(true);
+    }
+  }, [animDone, engineReady, setBooted]);
 
   return (
     <AnimatePresence>

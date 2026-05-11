@@ -196,6 +196,53 @@ export const BLOCK_ORDER: BlockId[] = [
   'glitch',
 ];
 
+// ---------------------------------------------------------------------------
+// V2 wire-format block index table.
+//
+// Stable ordering used by the worker's compact cell encoding (uint16: high
+// byte = layer, low byte = block index). Index 0 is reserved for air.
+//
+// APPEND-ONLY contract: never reorder or remove entries — only add new
+// BlockIds at the end. Re-numbering would invalidate every persisted OBS2
+// vault.
+// ---------------------------------------------------------------------------
+export const BLOCK_INDEX_TABLE: ReadonlyArray<BlockId | null> = [
+  null, // 0 — air / empty cell
+  'obsidian', // 1
+  'chrome', // 2
+  'corp-glass', // 3
+  'neon-cyan', // 4
+  'neon-magenta', // 5
+  'toxic-core', // 6
+  'data-stream', // 7
+  'holo-billboard', // 8
+  'circuit', // 9
+  'power-line', // 10
+  'neural-node', // 11
+  'glitch', // 12
+];
+
+const _blockIdToIndex = new Map<BlockId, number>();
+for (let i = 1; i < BLOCK_INDEX_TABLE.length; i++) {
+  const id = BLOCK_INDEX_TABLE[i];
+  if (id) _blockIdToIndex.set(id, i);
+}
+
+/** BlockId -> wire index. Returns 0 (air) for null. Throws on unknown id. */
+export function blockIdToIndex(id: BlockId | null): number {
+  if (id === null) return 0;
+  const idx = _blockIdToIndex.get(id);
+  if (idx === undefined) {
+    throw new Error(`Unknown BlockId "${id}" — missing from BLOCK_INDEX_TABLE`);
+  }
+  return idx;
+}
+
+/** Wire index -> BlockId. Returns null for 0 (air) or any unknown index. */
+export function indexToBlockId(idx: number): BlockId | null {
+  return BLOCK_INDEX_TABLE[idx] ?? null;
+}
+
 export const CATEGORY_ORDER: Array<{ id: import('@/types').BlockCategory; label: string }> = [
   { id: 'structure', label: 'STRUCTURE' },
   { id: 'neon', label: 'NEON' },

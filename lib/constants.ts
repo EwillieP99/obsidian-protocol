@@ -9,10 +9,30 @@ export const CELL = 1;
 // Grid floor
 export const FLOOR_Y = -0.5; // bottom face of layer 0 sits on this y
 
-// Storage keys
+// V2 chunking. The engine subdivides the world into 16³ chunks. Y is rounded
+// up to a multiple of CHUNK_SIZE so the chunk grid stays cube-shaped — the
+// upper 4 layers (y >= WORLD_HEIGHT) are unused but cheap.
+export const CHUNK_SIZE = 16;
+export const CHUNK_VOLUME = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE; // 4096
+export const WORLD_Y_ROUNDED = Math.ceil(WORLD_HEIGHT / CHUNK_SIZE) * CHUNK_SIZE; // 16
+
+// Maximum instances per InstancedMesh. Sized for ~10× V1's typical voxel
+// count so we never reallocate mid-session.
+export const MAX_INSTANCES = 16384;
+
+// Engine history capacity (mirrors HISTORY_LIMIT below; named for engine use).
+export const ENGINE_CHRONO_LIMIT = 100;
+
+// Stats tick cadence — how often the voxel worker recomputes integrity /
+// anomaly / cellCount and emits STATS. Drives the HUD update rate.
+export const STATS_TICK_MS = 200;
+
+// V2 storage keys (V1 keys preserved below for migration discovery).
 export const SAVE_DB_KEY = 'obsidian-protocol-saves-v1';
 export const PREFS_KEY = 'obsidian-protocol-prefs-v1';
 export const AUTOSAVE_KEY = 'obsidian-protocol-autosave-v1';
+export const AUTOSAVE_KEY_V2 = 'obsidian-protocol-autosave-v2';
+export const SAVE_DB_KEY_V2 = 'obsidian-protocol-saves-v2';
 
 // History
 export const HISTORY_LIMIT = 100;

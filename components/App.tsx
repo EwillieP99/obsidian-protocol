@@ -18,6 +18,7 @@ import { LoadingVeil } from '@/components/ui/LoadingVeil';
 import { HudStream } from '@/components/ui/HudStream';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useEffectBindings } from '@/hooks/useEffectBindings';
+import { useEngine } from '@/hooks/useEngine';
 import { useUIStore } from '@/stores/uiStore';
 import { autoSave, loadAutoSave } from '@/lib/persistence';
 import { useVoxelStore } from '@/stores/voxelStore';
@@ -29,6 +30,9 @@ const Scene = dynamic(() => import('@/components/scene/Scene').then((m) => m.Sce
 });
 
 export default function App() {
+  // Initialize the V2 engine singleton at app mount. Phase 1 stub resolves
+  // synchronously; future phases will block on worker spin-up.
+  useEngine();
   useKeyboardShortcuts();
   useEffectBindings();
   const booted = useUIStore((s) => s.booted);
