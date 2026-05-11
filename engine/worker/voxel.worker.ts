@@ -55,7 +55,6 @@ let contract: Contract | null = null;
 let historyLimit = ENGINE_CHRONO_LIMIT;
 let statsTickMs = 200;
 let statsTimer: ReturnType<typeof setInterval> | null = null;
-let initialized = false;
 
 // Incremental stats counters — kept in sync on every cell write. Stats
 // emission is O(1) regardless of world size.
@@ -426,7 +425,8 @@ function handleRenameLayer(id: number, name: string): void {
 // ---------------------------------------------------------------------------
 
 function handleInit(msg: Extract<MainToVoxelMsg, { type: 'INIT' }>): void {
-  if (initialized) return;
+  // INIT always (re-)seeds the worker — engine.loadSave() relies on this
+  // to swap state without spawning a fresh worker process.
   layers = msg.layers.map((l) => ({ ...l }));
   activeLayer = msg.activeLayer;
   blockTable = msg.blockTable;
@@ -450,9 +450,7 @@ function handleInit(msg: Extract<MainToVoxelMsg, { type: 'INIT' }>): void {
     }
   }
 
-  initialized = true;
-
-  // Start stats ticker.
+  // Start (or restart) stats ticker.
   if (statsTimer !== null) clearInterval(statsTimer);
   statsTimer = setInterval(emitStats, statsTickMs);
 
@@ -531,7 +529,6 @@ self.onmessage = (ev: MessageEvent<MainToVoxelMsg>) => {
         chunks.clear();
         chronoLog = [];
         future = [];
-        initialized = false;
         break;
       default: {
         // Exhaustiveness check — switch over discriminated union.
