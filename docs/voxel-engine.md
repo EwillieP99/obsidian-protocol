@@ -2,7 +2,16 @@
 
 The voxel engine is the technical heart of Obsidian Protocol. V2 is a from-scratch rebuild that moves all voxel state off the main thread; V1 is preserved as a fallback / read-cache while the migration finishes.
 
-> **Status:** V2 scaffolding at `5f215f9`; RenderBridge + worker re-INIT at `2d42765`; Phases 3.3+3.4 shipped at `2322016` — `Voxels.tsx` is now the RenderBridge thin wrapper and all mutation sites route through `IVoxelEngine`. Phase 3.2 (worker as true mutation authority, retire storeUnsub) is next. See [V1 Autopsy](v1_autopsy.md) for the original problem statement.
+> **Status — 2026-05-13 — commit `2322016`**
+>
+> - ✅ **Phases 0–2** (`5f215f9`): engine scaffolding, worker stand-up, chunk model, `RenderBridge` built, worker re-INIT path wired
+> - ✅ **Phase 3.1** (`2d42765`): `RenderBridge` instantiated; worker seeds from voxelStore on INIT
+> - ✅ **Phase 3.3** (`2322016`): `Voxels.tsx` rewritten as RenderBridge thin wrapper — no more `useEffect([revision])` full-rebuild
+> - ✅ **Phase 3.4** (`2322016`): All mutation sites (`Interaction`, `Toolbar`, `HistoryPanel`, keyboard shortcuts, `persistence`, `contracts`) now call `engine.*` instead of `voxelStore.*`
+> - ⏳ **Phase 3.2** (next): Flip `VoxelEngine` so mutations post to the worker directly; worker `PATCH/STATS/CHRONO/LAYERS` replies drive the event bus; shadow-write voxelStore from those replies. Retires the `storeUnsub`.
+> - ⏳ **Phase 3.5** (after 3.2): Delete `voxelStore` once all UI reads go through `engine.*`
+>
+> See [V1 Autopsy](v1_autopsy.md) for the original problem statement.
 
 ---
 
@@ -177,12 +186,17 @@ What V2 **changed**:
 
 | File | Role | V2 status |
 |---|---|---|
-| `stores/voxelStore.ts` | All voxel data, layers, history, contracts | Demoted to shadow read cache; retired after Phase 3.4 |
-| `components/scene/Voxels.tsx` | Per-blockId InstancedMesh + full-rebuild useEffect | Rewritten as RenderBridge thin wrapper in Phase 3.3 |
-| `components/scene/Interaction.tsx` | Pointer-to-cell + brush ops + `voxelStore.applyOps` call | Migrated to `engine.applyOps` in Phase 3.4 |
+| `stores/voxelStore.ts` | All voxel data, layers, history, contracts | ⚠ Shadow read cache (Phase 3.4 done) — retired in Phase 3.5 |
+| `components/scene/Voxels.tsx` | Per-blockId InstancedMesh + full-rebuild useEffect | ✅ RenderBridge thin wrapper (Phase 3.3) |
+| `components/scene/Interaction.tsx` | Pointer-to-cell + brush ops + `voxelStore.applyOps` | ✅ `engine.applyOps` (Phase 3.4) |
+| `hooks/useKeyboardShortcuts.ts` | Undo/redo → voxelStore | ✅ `engine.undo/redo` (Phase 3.4) |
+| `components/ui/Toolbar.tsx` | Undo/redo/clear → voxelStore | ✅ engine (Phase 3.4) |
+| `components/ui/HistoryPanel.tsx` | History display + undo/redo → voxelStore | ✅ engine (Phase 3.4) |
+| `lib/persistence.ts` | loadSave → voxelStore directly | ✅ `engine.loadSave()` (Phase 3.4) |
+| `lib/contracts.ts` | applyContract → `store.applyOps` | ✅ `engine.applyOps` (Phase 3.4) |
 | `lib/blocks.ts` | Block definitions + stats | Extended with `BLOCK_INDEX_TABLE` for V2 wire format |
-| `lib/brush.ts` | Brush shape + operation generation | Unchanged — V2 still uses for preview + pre-engine expansion |
+| `lib/brush.ts` | Brush shape + operation generation | Unchanged — still used for preview + pre-engine op expansion |
 
 ---
 
-*Last updated: 2026-05-10. Commit baseline: `2d42765`.*
+*Last updated: 2026-05-13. Commit baseline: `2322016`.*

@@ -6,18 +6,29 @@ This document provides a deep dive into the technical design of Obsidian Protoco
 
 ## 0. V1 → V2 Status
 
-> **Phase tracker:** V2 scaffolding at `5f215f9`; RenderBridge + worker re-INIT at `2d42765`; Phases 3.3+3.4 at `2322016`. Voxels.tsx is now the RenderBridge thin wrapper; all mutations route through `IVoxelEngine`. Phase 3.2 (worker as true mutation authority) is next. See [V1 Autopsy](v1_autopsy.md) for the original problem statement.
+> **Phase tracker — 2026-05-13 — commit `2322016`**
+>
+> | Phase | Commit | Status |
+> |---|---|---|
+> | 0–2: Engine scaffolding, worker stand-up, chunk model | `5f215f9` | ✅ Done |
+> | 3.1: RenderBridge + worker re-INIT path | `2d42765` | ✅ Done |
+> | 3.3: `Voxels.tsx` → RenderBridge thin wrapper | `2322016` | ✅ Done |
+> | 3.4: All mutation sites → `IVoxelEngine` | `2322016` | ✅ Done |
+> | 3.2: Worker as true mutation authority (retire storeUnsub) | — | ⏳ Next |
+> | 3.5: Retire `voxelStore` once all UI reads through engine | — | ⏳ Pending 3.2 |
+> | 4: Dedicated raycast worker | — | 🔜 Roadmap |
+> | 5: OBS2 binary persistence (compress worker) | — | 🔜 Roadmap |
 
-V1 (commits up to `1775675`) is feature-complete but main-thread-bound — every brush stroke, undo, layer toggle, or contract load hitches 80–200 ms above ~800 voxels. The root cause: all voxel data lives in `voxelStore` (a Zustand store) on the main thread, so every mutation triggers React reconciliation, Framer Motion animation loops, and shader uniform updates simultaneously.
+**Current state (as of `2322016`):** `Voxels.tsx` is the RenderBridge thin wrapper — no more `useEffect([revision])` full-rebuilds. Every mutation (place, erase, undo, redo, contract load, save load, clear) now routes through `IVoxelEngine`. `voxelStore` has been demoted to a **shadow read cache**: the engine proxy methods still write into it so that `HistoryPanel`, `StatusBar`, `IntegrityMeter`, `LayerPanel`, and `useEffectBindings` continue reading from it without needing to be migrated yet.
 
-V2's mandate:
+**Phase 3.2 (next):** Flip `VoxelEngine.applyOps/undo/redo/…` to post directly to the worker instead of calling voxelStore. The worker's `PATCH/STATS/CHRONO/LAYERS` replies drive the engine event bus; the engine shadow-writes voxelStore from those replies. Once complete, the `storeUnsub` can be removed and voxelStore is purely a read cache.
 
-1. **Tear the engine out of React.** All voxel state lives in a dedicated Web Worker (`engine/worker/voxel.worker.ts`). React touches it only through a typed API surface (`types/engine.ts:IVoxelEngine`).
-2. **Frame-coalesce GPU writes.** A `RenderBridge` accumulates per-cell deltas between frames and applies them in a single pass per frame, replacing V1's `useEffect([cells, revision, layerRevision])` full-rebuild.
-3. **Add chunking.** The world is divided into 16³ chunks (`engine/chunks/Chunk.ts`) with bit-packed `uint16` cells (high byte = layer, low byte = block index). Sparse `Map<chunkKey, Chunk>` storage scales to a 256×64×256 world without architectural changes.
-4. **Binary persistence.** Saves move from V1 JSON to OBS2 (binary + RLE) via a dedicated compress worker. ~140× smaller for typical builds. (Phase 5.)
+V2's full mandate:
 
-V1 is preserved verbatim and still drives the visible UI today. V2 lives alongside it; phases 3.2–3.4 progressively migrate UI consumers to the engine API, after which V1's `voxelStore` is retired.
+1. **Tear the engine out of React.** All voxel state lives in `engine/worker/voxel.worker.ts`. React touches it only through `types/engine.ts:IVoxelEngine`.
+2. **Frame-coalesce GPU writes.** `RenderBridge` accumulates per-cell deltas and applies them in a single `flushPending()` per frame, replacing V1's full-rebuild `useEffect`.
+3. **Add chunking.** 16³ chunks with bit-packed `uint16` cells; sparse `Map<chunkKey, Chunk>` scales to 256×64×256 without changes.
+4. **Binary persistence.** Saves move from V1 JSON to OBS2 (binary + RLE) via a compress worker. ~140× smaller for typical builds. (Phase 5.)
 
 ---
 
@@ -28,14 +39,14 @@ V1 is preserved verbatim and still drives the visible UI today. V2 lives alongsi
 | Framework          | Next.js 14 (App Router)            | SSR, routing, modern React |
 | 3D Rendering       | React Three Fiber (R3F) v8 + Three.js r170 | Real-time WebGL voxel engine |
 | Post-processing    | @react-three/postprocessing        | Bloom, Glitch, Chromatic Aberration, etc. |
-| State Management   | Zustand + subscribeWithSelector    | Global reactive state (voxels, UI, effects) |
+| State Management   | Zustand + subscribeWithSelector    | Global reactive state (UI + effects; voxels shadow-only) |
 | Styling            | Tailwind CSS + Framer Motion       | Cyberpunk neon UI |
 | Persistence        | idb-keyval (IndexedDB)             | Autosave + named saves |
 | Audio              | Web Audio API (synthesized)        | No asset dependency |
 | Fonts              | Inter + Share Tech Mono            | Terminal + clean sans |
 | Types              | TypeScript (strict)                | Full type safety |
 
-**Key Constraint:** Pinned to Next.js 14 because R3F v8 is incompatible with Next 15’s React internals.
+**Key Constraint:** Pinned to Next.js 14 because R3F v8 is incompatible with Next 15's React internals.
 
 ---
 
@@ -51,10 +62,10 @@ components/
 ├── App.tsx             # Main orchestrator (HUD + Scene + Boot)
 ├── scene/              # All Three.js / R3F components
 │   ├── Scene.tsx       # Canvas + lights + camera setup
-│   ├── Voxels.tsx      # V1: InstancedMesh per blockId (full-rebuild on revision++)
-│   │                   # V2 (Phase 3.3): thin wrapper around RenderBridge
-│   ├── Interaction.tsx # Pointer events + brush logic
-│   ├── Cursor.tsx      # Live 3D brush preview
+│   ├── Voxels.tsx      # ✅ V2: RenderBridge thin wrapper (subscribes to
+│   │                   #    engine 'patch'+'layers'; flushPending in useFrame)
+│   ├── Interaction.tsx # Pointer events + brush logic → engine.applyOps()
+│   ├── Cursor.tsx      # Live 3D brush preview (main-thread, unchanged)
 │   ├── CameraRig.tsx   # Presets + focus + cinematic mode
 │   ├── PostFX.tsx      # Reactive post-processing
 │   ├── SceneEffects.tsx# Particles + shake + flash highlights
@@ -69,7 +80,9 @@ engine/                 # V2 ENGINE — zero React imports. Black box.
 ├── chunks/
 │   └── Chunk.ts        # Uint16Array[4096] chunk (8 KB), 16³, count cache
 ├── core/
-│   └── VoxelEngine.ts  # Main-thread singleton; spawns + owns the workers
+│   └── VoxelEngine.ts  # Main-thread singleton; spawns worker; event emitter;
+│                       # proxy methods still shadow-write voxelStore (Phase 3.2
+│                       # will flip to worker-canonical)
 └── worker/
     └── voxel.worker.ts # Canonical voxel state (chunks, chrono-log, layers,
                         # incremental stats counters, 200 ms STATS tick).
@@ -77,34 +90,31 @@ engine/                 # V2 ENGINE — zero React imports. Black box.
                         # compress.worker.ts (Phase 5).
 
 stores/
-├── voxelStore.ts       # V1 store (cells, layers, history, contracts).
-│                       # V2 (post Phase 3.4): shadow read cache; retired
-│                       # once every UI consumer migrates to engine.*
-├── uiStore.ts          # Brush, panels, camera, settings, FPS
-└── effectsStore.ts     # Particles, shake, bloom flash, focus target
+├── voxelStore.ts       # ⚠ Shadow read cache only (as of Phase 3.4). Written
+│                       #   by VoxelEngine proxy methods; read by HUD panels +
+│                       #   useEffectBindings. Retired after Phase 3.5.
+├── uiStore.ts          # Brush, panels, camera, settings, FPS. Unchanged.
+└── effectsStore.ts     # Particles, shake, bloom flash, focus. Unchanged.
 
 lib/
-├── blocks.ts           # 12 block definitions + lore + stats; V2 adds
-│                       # BLOCK_INDEX_TABLE (append-only wire ordering)
-├── constants.ts        # World params + V2 chunk constants (CHUNK_SIZE,
-│                       # MAX_INSTANCES, STATS_TICK_MS, …)
-├── brush.ts            # Brush shape logic (V1 + V2 — main-thread preview)
-├── persistence.ts      # IndexedDB save/load + autosave (V1 JSON today;
-│                       # OBS2 binary in Phase 5)
-├── contracts.ts        # Procedural Corporate Contract generator
+├── blocks.ts           # 12 block definitions + BLOCK_INDEX_TABLE (V2 wire)
+├── constants.ts        # World params + V2 chunk constants
+├── brush.ts            # Brush shape logic (main-thread preview; unchanged)
+├── persistence.ts      # IndexedDB save/load — calls engine.loadSave()
+├── contracts.ts        # Procedural contract generator — calls engine.applyOps()
 ├── audio.ts            # Web Audio SFX
-└── utils.ts            # Helpers + V2 chunk helpers (chunkKey, localIdx,
-                        # cellLinearIdx, chunkCoord, inWorld)
+└── utils.ts            # Helpers + V2 chunk helpers
 
 types/
 ├── index.ts            # V1 shared TypeScript interfaces
 └── engine.ts           # V2 public API surface (IVoxelEngine, CellOp,
-                        # CellDelta, EngineEvent, ChronoEntry, …)
+                        # CellDelta, EngineEvent + clearBeforeApply, …)
 
 hooks/
-├── useEngine.ts        # V2 React access point to VoxelEngine singleton
-├── useKeyboardShortcuts.ts
-└── useEffectBindings.ts
+├── useEngine.ts        # React access point — useEngine() + getEngine()
+├── useKeyboardShortcuts.ts  # All undo/redo/etc via getEngine()
+└── useEffectBindings.ts     # Particles/audio via voxelStore subscription
+                             # (still works because shadow writes keep it live)
 
 shaders/                # Custom GLSL (6 block types with shaders)
 ```
@@ -115,34 +125,27 @@ shaders/                # Custom GLSL (6 block types with shaders)
 
 ### 3.1 Voxel Engine (The Heart)
 
-**V1 (today's visible UI):**
+**Current state (V2, Phase 3.3+3.4 complete):**
 
-- Uses **one `InstancedMesh` per block type** (12 total)
-- Shared `uTime` uniform across all shader materials (very efficient)
-- Per-layer opacity handled via `instanceColor` modulation (no alpha blending state changes)
-- Custom bounding sphere on geometry for proper frustum culling across the entire world
-- Dynamic capacity growth when placing large numbers of voxels
-- Revision-based reactivity (store `revision` increments → re-render all instances). **This is the V1 thrash site** — see autopsy.
+- `Voxels.tsx` is a ~55-line RenderBridge thin wrapper:
+  - Creates `RenderBridge` with a module-level `sharedUniforms` object
+  - On mount: seeds bridge from `engine.getAllCells()` + `engine.getLayers()`
+  - `engine.on('patch')` → `bridge.queueDeltas(deltas)` (with `clearBeforeApply` for load/clear ops)
+  - `engine.on('layers')` → `bridge.setLayers(layers)` (triggers per-layer opacity rebake)
+  - `useFrame` → `bridge.flushPending()` + `sharedUniforms.uTime.value` update
+  - Renders `bridge.renderableMeshes` via `<primitive object={mesh} />`
 
-**V2 (shipped at `2d42765`, partial wire-up):**
+- `RenderBridge` pre-allocates 12 `InstancedMesh` at `MAX_INSTANCES=16384` each. A `SlotAllocator` maps `cellLinearIdx → instanceSlot` with O(1) alloc/free. GPU buffers never grow mid-session.
 
-- Worker-canonical state: `engine/worker/voxel.worker.ts` owns the cells, chrono-log, layers, and incremental stats counters off the main thread.
-- 16³ chunks with bit-packed `uint16` cells (`engine/chunks/Chunk.ts`). Sparse `Map<chunkKey, Chunk>`. Air cells = 0; non-zero = `(layer << 8) | blockIndex`.
-- `RenderBridge` (`engine/bridge/RenderBridge.ts`) pre-allocates 12 `InstancedMesh` at `MAX_INSTANCES=16384` each. A `SlotAllocator` maps `cellLinearIdx -> instanceSlot` with O(1) alloc/free.
-- Frame-coalesced GPU writes: worker `PATCH` deltas accumulate in a ring buffer and apply once per frame in `useFrame`. `instanceMatrix.needsUpdate` fires at most once per dirty mesh per frame.
-- Incremental stats: integrity / anomaly / cellCount are kept current on every cell write inside the worker. `engine.getStats()` is O(1).
-- Same shader system. Same `uTime` shared uniform pattern. Same world-bounding-sphere frustum-cull trick.
+- **Phase 3.2 remaining work:** `VoxelEngine.applyOps/undo/redo/clearAll/loadSave` currently proxy to voxelStore and emit engine events from there. Phase 3.2 flips this so ops post to the worker directly; worker's `PATCH/STATS/CHRONO/LAYERS` replies become the source of engine events, and voxelStore gets shadow-written from those replies.
 
 ### 3.2 State Management (Zustand)
 
-Three independent stores with clear responsibilities:
+Three independent stores:
 
-- **voxelStore**: Cells (Map), Layers (12), History (undo/redo), Contracts, Integrity calculation.
-  - **V2 evolution:** voxelStore is being demoted to a shadow read cache. After Phase 3.4, the worker owns canonical cells / layers / chrono-log, and the engine `setState`s back into voxelStore on each `PATCH/CHRONO/LAYERS` so unmigrated read UI keeps working. Once every UI consumer reads through the engine, voxelStore is deleted.
-- **uiStore**: Active block, brush state, panel visibility, camera preset, quality settings, FPS. **Unchanged in V2.**
-- **effectsStore**: Particles, screen shake, bloom flash, cell flash highlights, camera focus target. **Unchanged in V2.**
-
-This separation keeps concerns clean and allows fine-grained subscriptions.
+- **voxelStore** — **Shadow read cache (as of Phase 3.4).** Written by VoxelEngine proxy methods. Read by: `HistoryPanel` (history/future arrays), `LayerPanel` (layer mutations + block counts), `StatusBar`/`IntegrityMeter` (cell count + integrity), `useEffectBindings` (particles/audio). Will be retired in Phase 3.5 once all readers migrate to engine reads.
+- **uiStore** — Active block, brush state, panel visibility, camera preset, quality settings, FPS. Unchanged.
+- **effectsStore** — Particles, screen shake, bloom flash, cell flash highlights, camera focus target. Unchanged.
 
 ### 3.3 Brush System
 
@@ -150,63 +153,85 @@ Located in `lib/brush.ts`:
 - Supports 5 modes: `paint`, `erase`, `fill`, `replace`, `eyedropper`
 - 3 shapes: `cube`, `sphere`, `plane`
 - Smart connect for power lines
-- Operations are batched into history entries
+- Operations expand on the main thread (for low-latency `Cursor.tsx` preview), then pass to `engine.applyOps()` as `CellOp[]`
 
 ### 3.4 History & Undo/Redo
 
-- Full patch-based history (stores before/after state per cell)
-- Chrono-log timeline UI (click to jump)
+- Full patch-based history (stores before/after state per cell) in both `voxelStore` (shadow) and `voxel.worker.ts` (canonical)
+- Chrono-log timeline UI — click any entry calls `engine.jumpToChrono(id)` which walks back via repeated `engine.undo()`
 - Visual flash feedback on affected cells (cyan for redo, magenta for undo)
-- Limited to last 100 actions
+- All history mutations route through `IVoxelEngine`: keyboard shortcuts, Toolbar buttons, HistoryPanel buttons all call `getEngine().undo/redo`
 
 ### 3.5 Performance Features
 
-**V1:**
+**V1 (historical):**
+- Quality presets (HIGH / BALANCED / PERFORMANCE) — dynamically swap post-processing and drone count
+- Auto-degrade — drops quality if FPS stays low
+- Shared `uTime` uniform (single `useFrame` for all animated blocks)
+- Frustum culling + instance capping, particle system capped at 360
 
-- Quality presets (HIGH / BALANCED / PERFORMANCE) that dynamically change post-processing and drone count
-- Auto-degrade system (drops quality if FPS stays low)
-- Shared shader uniforms (single `useFrame` for all animated blocks)
-- Frustum culling + instance capping
-- Particle system capped at 360
-
-**V2 adds:**
-
-- **Web Worker offload.** Brush results, undo/redo deltas, integrity / anomaly / cellCount, layer mutations — all computed off the main thread.
-- **Frame-coalesced GPU writes.** Multiple worker `PATCH` bursts between frames apply in a single `flushPending()` pass. `instanceMatrix.needsUpdate` fires at most once per dirty mesh per frame.
-- **O(1) slot allocation.** `SlotAllocator` uses a `Map<cellIdx, slot>` + free-list LIFO. No per-frame scans, no array compaction.
-- **Incremental stats counters.** `cellCount / sumStability / sumAnomaly` update on every cell write inside the worker. The 200 ms `STATS` tick emits cached values — no world-walk.
-- **Pre-allocated GPU buffers.** 12 × `MAX_INSTANCES=16384` × 64 B mat4 = ~12 MB; no mid-session reallocation.
-- **Zero-copy worker I/O.** Large payloads (occupancy deltas, OBS2 buffers) move via transferable `ArrayBuffer`, not `SharedArrayBuffer` — no COOP/COEP headers needed.
+**V2 adds (current + planned):**
+- **Frame-coalesced GPU writes (✅):** Multiple worker `PATCH` bursts between frames apply in a single `flushPending()` pass. `instanceMatrix.needsUpdate` fires at most once per dirty mesh per frame.
+- **O(1) slot allocation (✅):** `SlotAllocator` uses `Map<cellIdx, slot>` + free-list LIFO. No per-frame scans.
+- **Incremental stats counters (✅):** `cellCount / sumStability / sumAnomaly` update inside the worker on every cell write. `computeStats()` is O(1) regardless of world size.
+- **Pre-allocated GPU buffers (✅):** 12 × `MAX_INSTANCES=16384` × 64 B = ~12 MB; no reallocation mid-session.
+- **Web Worker offload (⏳ Phase 3.2):** Brush results, undo/redo deltas, integrity computation — currently on main thread via voxelStore proxy; moves fully off-thread when worker becomes the mutation authority.
+- **Zero-copy worker I/O (🔜):** Large payloads via transferable `ArrayBuffer`; no COOP/COEP headers required.
 
 ---
 
 ## 4. Rendering Pipeline
 
-**V1:**
-
-1. `Scene.tsx` → Sets up Canvas, lights, fog, CameraRig
-2. `Interaction.tsx` → Catches all pointer events; calls `voxelStore.applyOps`
-3. `Voxels.tsx` → Subscribes to `cells / revision / layerRevision`; rebuilds every InstancedMesh on every change
-4. `PostFX.tsx` → EffectComposer with reactive Bloom + Glitch
-5. `SceneEffects.tsx` → Particles + Camera Shake + Cell Flash (Instanced)
-6. `Cursor.tsx` → Live brush preview (ghosts + envelope)
-
-**V2 mutation path** (post-Phase-3.4):
+### Current flow (Phase 3.3+3.4 complete)
 
 ```
-Interaction.tsx → engine.applyOps(CellOp[])
-   ↓ postMessage
-voxel.worker (chunk write, chrono push, stats update, delta build)
-   ↓ postMessage
+User interaction
+  ↓
+Interaction.tsx → getEngine().applyOps(CellOp[])
+  ↓
+VoxelEngine.applyOps
+  ├─ voxelStore.applyOps()  ← shadow write (keeps HUD panels + useEffectBindings live)
+  ├─ emits engine 'patch' event with CellDelta[]
+  └─ posts APPLY_OPS to worker  ← worker mirrors state (Phase 2 holdover)
+
+engine 'patch' event
+  ↓
+Voxels.tsx  engine.on('patch') → bridge.queueDeltas(deltas)
+  ↓
+useFrame → bridge.flushPending()
+  ↓
+InstancedMesh GPU buffers updated  ← single pass, only dirty meshes
+
+voxelStore revision bump (from shadow write)
+  ↓
+useEffectBindings subscription fires → particles / audio / shake
+HistoryPanel / StatusBar / IntegrityMeter / LayerPanel re-render
+```
+
+Layer changes (from LayerPanel) follow the same pattern: voxelStore layer methods bump `layerRevision` → `storeUnsub` in VoxelEngine emits `'layers'` → Voxels.tsx bridge.setLayers() rebakes affected layers.
+
+### Target flow (Phase 3.2, worker-canonical)
+
+```
+User interaction
+  ↓
+Interaction.tsx → getEngine().applyOps(CellOp[])
+  ↓
+VoxelEngine → postMessage APPLY_OPS to worker
+  ↓
+voxel.worker: chunk write, chrono push, incremental stats, delta build
+  ↓ postMessage PATCH / STATS / CHRONO / LAYERS
 VoxelEngine.handleWorkerMessage
-   ├──► RenderBridge.queueDeltas() ─── useFrame ──► flushPending() ──► GPU
-   ├──► shadow-write voxelStore.cells (back-compat for unmigrated read UI)
-   └──► emit 'patch'/'stats'/'chrono'/'layers' on the engine event bus
-        ↓
-   useEffectBindings (particles / audio / shake), HUD subscribers
+  ├─ PATCH  → bridge.queueDeltas() + shadow-write voxelStore.cells
+  ├─ STATS  → statsCache + emit engine 'stats'
+  ├─ CHRONO → emit engine 'chrono' + shadow-write voxelStore.history
+  └─ LAYERS → emit engine 'layers' + shadow-write voxelStore.layers
+
+useFrame → bridge.flushPending() → GPU
+useEffectBindings / HUD reads via voxelStore shadow
 ```
 
-`PostFX.tsx`, `SceneEffects.tsx`, `Cursor.tsx`, and `Scene.tsx` are unchanged.
+`PostFX.tsx`, `SceneEffects.tsx`, `Cursor.tsx`, and `Scene.tsx` are unchanged in both flows.
 
 ---
 
@@ -225,30 +250,55 @@ Each block has: `color`, `emissive`, `emissiveIntensity`, `stability`, `anomaly`
 
 ### V2 wire format
 
-The worker and main thread share a compact representation:
-
 | Surface | Encoding |
 |---|---|
 | Public engine API (`CellOp`, `CellDelta`) | `BlockId` strings + numeric layer |
 | Wire (`WireOp`, `WireDelta`) | `BlockIndex` uint8 + numeric layer |
 | Stored in `Chunk.data` | uint16 per cell: `(layer << 8) \| blockIndex`. `0x0000` = air. |
 
-`BLOCK_INDEX_TABLE` in `lib/blocks.ts` defines the BlockId ↔ BlockIndex mapping. It is **append-only** — re-ordering would invalidate every persisted OBS2 vault.
+`BLOCK_INDEX_TABLE` in `lib/blocks.ts` defines the BlockId ↔ BlockIndex mapping. **Append-only** — re-ordering invalidates every persisted OBS2 vault.
 
-Chunk identity: a 16³ chunk's key is `"cx,cy,cz"` (signed int16). Local index inside a chunk: `(y_local << 8) | (z_local << 4) | x_local`. Global cell identity for `SlotAllocator` is `cellLinearIdx(x,y,z) = (x + HALF) + (z + HALF) * WORLD_SIZE + y * WORLD_SIZE²`.
+Chunk identity: key is `"cx,cy,cz"` (signed int16). Local index: `(y_local << 8) | (z_local << 4) | x_local`. Global cell identity for `SlotAllocator`: `cellLinearIdx(x,y,z) = (x + HALF) + (z + HALF) * WORLD_SIZE + y * WORLD_SIZE²`.
 
 ---
 
-## 6. Future-Proofing & Extensibility
+## 6. V1 Reference (Historical)
 
-The architecture was designed to be easy to extend:
+V1 was a 1-hour Claude Code build. Its design choices that V2 **preserved**:
+
+- **One `InstancedMesh` per BlockId** (12 total) — V2 keeps this geometry but moves slot management into `SlotAllocator`.
+- **Per-cell opacity via `instanceColor` grayscale** — V2 keeps this trick; rebake runs from `RenderBridge.setLayers()`.
+- **Shared `uTime` uniform** across all shader materials — same module-level const in `Voxels.tsx`.
+- **Custom `boundingSphere`** on geometry for world-spanning frustum culling — identical trick in `RenderBridge`.
+
+What V2 **changed**:
+
+- V1's `Voxels.tsx` ran `useEffect([cells, revision, layerRevision])` which walked the entire cells Map on every change. **Eliminated in Phase 3.3.**
+- V1's `voxelStore` (Zustand) owned canonical cells. **Demoted to shadow cache in Phase 3.4.**
+- V1's brush ops and undo/redo ran on the main thread via voxelStore. **API boundary moved to `IVoxelEngine` in Phase 3.4; compute moves off-thread in Phase 3.2.**
+
+| File | Original V1 role | V2 status |
+|---|---|---|
+| `stores/voxelStore.ts` | Canonical voxel data + history | ⚠ Shadow read cache — retired in Phase 3.5 |
+| `components/scene/Voxels.tsx` | Full-rebuild InstancedMesh per block type | ✅ RenderBridge thin wrapper (Phase 3.3) |
+| `components/scene/Interaction.tsx` | Pointer events → `voxelStore.applyOps` | ✅ → `engine.applyOps` (Phase 3.4) |
+| `hooks/useKeyboardShortcuts.ts` | Undo/redo → voxelStore directly | ✅ → `engine.undo/redo` (Phase 3.4) |
+| `components/ui/Toolbar.tsx` | Undo/redo/clear → voxelStore | ✅ → engine (Phase 3.4) |
+| `components/ui/HistoryPanel.tsx` | History display + undo/redo → voxelStore | ✅ → engine (Phase 3.4) |
+| `lib/persistence.ts` | loadSave → voxelStore directly | ✅ → `engine.loadSave()` (Phase 3.4) |
+| `lib/contracts.ts` | applyContract → `store.applyOps` | ✅ → `engine.applyOps` (Phase 3.4) |
+| `lib/blocks.ts` | Block definitions + stats | Extended with `BLOCK_INDEX_TABLE` for V2 wire |
+| `lib/brush.ts` | Brush shape + operation generation | Unchanged — still used for preview + pre-engine expansion |
+
+---
+
+## 7. Future-Proofing & Extensibility
+
 - Adding a new block type: update `lib/blocks.ts` (`BLOCK_TYPES` + `BLOCK_ORDER` + **append** to `BLOCK_INDEX_TABLE`) + optional shader
 - New UI panels follow the existing pattern in `components/ui/`
-- All major systems are decoupled via Zustand stores
-- The V2 engine sits behind a narrow API (`types/engine.ts:IVoxelEngine`); any consumer that uses the API only is shielded from internal restructuring (chunk sizes, worker shape, persistence format)
-
-V2 is the current rebuild track. The V1 description above is preserved as historical context — once Phase 3.4 lands and `voxelStore` is retired, the V1-specific bullets in §3.1, §3.5, and §4 will move to a footer-only "V1 Legacy" appendix.
+- The V2 engine sits behind `types/engine.ts:IVoxelEngine`; any consumer that uses the API is shielded from internal restructuring (chunk sizes, worker shape, persistence format)
+- `useEffectBindings` and the layer/history HUD panels can migrate to engine event subscriptions independently of each other, whenever we're ready to retire voxelStore
 
 ---
 
-*This document will be expanded as we continue development.*
+*Last updated: 2026-05-13. Commit baseline: `2322016`.*
