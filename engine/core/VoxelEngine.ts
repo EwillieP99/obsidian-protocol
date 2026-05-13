@@ -491,6 +491,7 @@ export class VoxelEngine implements IVoxelEngine {
       type: 'patch',
       deltas: deltasFromLoadedCells(next.cells, next.layers),
       label: `Load: ${save.name ?? 'vault'}`,
+      clearBeforeApply: true,
     });
   }
 
@@ -561,6 +562,11 @@ export class VoxelEngine implements IVoxelEngine {
   }
 
   // ---- Async I/O -----------------------------------------------------------
+
+  getAllCells(): CellDelta[] {
+    const state = useVoxelStore.getState();
+    return deltasFromLoadedCells(state.cells, state.layers);
+  }
 
   async serialize(): Promise<ArrayBuffer> {
     // Phase 1 stub: emit V1 JSON format wrapped in an ArrayBuffer. Phase 5

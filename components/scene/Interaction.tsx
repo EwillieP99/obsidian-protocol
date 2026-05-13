@@ -6,6 +6,7 @@ import { ThreeEvent } from '@react-three/fiber';
 import { useUIStore } from '@/stores/uiStore';
 import { useVoxelStore } from '@/stores/voxelStore';
 import { useEffectsStore } from '@/stores/effectsStore';
+import { getEngine } from '@/hooks/useEngine';
 import { brushCells, operationsForBrush } from '@/lib/brush';
 import { WORLD_SIZE, WORLD_HEIGHT, FLOOR_Y, HALF } from '@/lib/constants';
 import { toast } from 'sonner';
@@ -89,7 +90,10 @@ export function Interaction({ children }: { children: React.ReactNode }) {
         effectiveMode === 'fill' ? 'Fill' :
         effectiveMode === 'replace' ? 'Replace' :
         `Place ${activeBlock}`;
-      store.applyOps(ops, label);
+      getEngine().applyOps(
+        ops.map((o) => ({ x: o.x, y: o.y, z: o.z, blockId: o.block, layer: o.y })),
+        label,
+      );
     }
   }, []);
 

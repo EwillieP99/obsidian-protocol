@@ -68,7 +68,7 @@ export interface RaycastResult {
 // ---------------------------------------------------------------------------
 
 export type EngineEvent =
-  | { type: 'patch'; deltas: CellDelta[]; label: string }
+  | { type: 'patch'; deltas: CellDelta[]; label: string; clearBeforeApply?: boolean }
   | { type: 'stats'; stats: EngineStats }
   | { type: 'chrono'; entries: ChronoEntry[] }
   | { type: 'layers'; layers: LayerMeta[] }
@@ -115,6 +115,9 @@ export interface IVoxelEngine {
     origin: [number, number, number],
     direction: [number, number, number],
   ): Promise<RaycastResult | null>;
+
+  // ---- Bulk read (for initial bridge seed) ----
+  getAllCells(): CellDelta[];
 
   // ---- Lifecycle / subscriptions ----
   init(): Promise<void>;

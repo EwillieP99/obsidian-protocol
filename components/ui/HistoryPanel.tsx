@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useUIStore } from '@/stores/uiStore';
 import { useVoxelStore } from '@/stores/voxelStore';
 import { useEffectsStore } from '@/stores/effectsStore';
+import { getEngine } from '@/hooks/useEngine';
 import { fmtTime } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 
@@ -12,8 +13,6 @@ export function HistoryPanel() {
   const togglePanel = useUIStore((s) => s.togglePanel);
   const history = useVoxelStore((s) => s.history);
   const future = useVoxelStore((s) => s.future);
-  const undo = useVoxelStore((s) => s.undo);
-  const redo = useVoxelStore((s) => s.redo);
   const recentId = history[history.length - 1]?.id;
 
   return (
@@ -28,9 +27,13 @@ export function HistoryPanel() {
         >
           <header className="flex items-center justify-between px-3 py-2 border-b border-cyan-neon/20">
             <span className="terminal text-xs neon-text-cyan">// CHRONO LOG</span>
-            <span className="terminal text-[10px] text-cyan-glow/65">
-              {history.length} REVISIONS · {future.length} FORWARD
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="terminal text-[10px] text-cyan-glow/65">
+                {history.length} REVISIONS · {future.length} FORWARD
+              </span>
+              <button className="terminal text-[10px] text-cyan-glow/65 hover:text-cyan-neon" onClick={() => getEngine().undo()} title="Undo">[ ↩ ]</button>
+              <button className="terminal text-[10px] text-cyan-glow/65 hover:text-cyan-neon" onClick={() => getEngine().redo()} title="Redo">[ ↪ ]</button>
+            </div>
             <button
               className="terminal text-[10px] text-cyan-glow/65 hover:text-cyan-neon"
               onClick={() => togglePanel('history')}
@@ -55,10 +58,8 @@ export function HistoryPanel() {
                     transition={{ duration: 0.6 }}
                     whileHover={{ scale: 1.04 }}
                     onClick={() => {
-                      // Highlight cells before time-traveling so feedback lines up.
                       useEffectsStore.getState().highlightCells(h.patch.map(([k]) => k).slice(0, 96), '#00f9ff', 600);
-                      const stepsBack = history.length - 1 - i;
-                      for (let s = 0; s < stepsBack; s++) undo();
+                      getEngine().jumpToChrono(h.id);
                     }}
                     className={cn(
                       'flex flex-col items-center gap-0.5 px-2 py-1 border min-w-[64px]',
@@ -79,7 +80,7 @@ export function HistoryPanel() {
                 <button
                   key={h.id}
                   onClick={() => {
-                    for (let s = 0; s <= i; s++) redo();
+                    for (let s = 0; s <= i; s++) getEngine().redo();
                   }}
                   className={cn(
                     'flex flex-col items-center gap-0.5 px-2 py-1 border min-w-[64px]',

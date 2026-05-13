@@ -3,9 +3,15 @@
 import { get, set, del, keys } from 'idb-keyval';
 import { useVoxelStore } from '@/stores/voxelStore';
 import { useUIStore } from '@/stores/uiStore';
+import { getVoxelEngine } from '@/engine/core/VoxelEngine';
 import type { SerializedSave } from '@/types';
 import { SAVE_DB_KEY, AUTOSAVE_KEY } from '@/lib/constants';
 import { unkey } from '@/lib/utils';
+
+function encodeSave(data: SerializedSave): ArrayBuffer {
+  const bytes = new TextEncoder().encode(JSON.stringify(data));
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
 
 async function withLoading<T>(message: string, fn: () => Promise<T>): Promise<T> {
   const ui = useUIStore.getState();
@@ -80,7 +86,7 @@ export async function loadSave(name: string): Promise<boolean> {
   return withLoading(`LOADING ${name.toUpperCase()}`, async () => {
     const data = await get<SerializedSave>(`${SAVE_PREFIX}${name}`);
     if (!data) return false;
-    useVoxelStore.getState().loadSave(data);
+    getVoxelEngine().loadSave(encodeSave(data));
     return true;
   });
 }
@@ -92,7 +98,7 @@ export async function deleteSave(name: string) {
 export async function loadAutoSave(): Promise<boolean> {
   const data = await get<SerializedSave>(AUTOSAVE_KEY);
   if (!data) return false;
-  useVoxelStore.getState().loadSave(data);
+  getVoxelEngine().loadSave(encodeSave(data));
   return true;
 }
 
@@ -115,7 +121,7 @@ export async function importSaveJSONWithLoading(): Promise<void> {
           const text = await file.text();
           const data = JSON.parse(text) as SerializedSave;
           if (!data.cells || !Array.isArray(data.cells)) throw new Error('Invalid save');
-          useVoxelStore.getState().loadSave(data);
+          getVoxelEngine().loadSave(encodeSave(data));
         } catch (e) {
           reject(e);
           return;
@@ -151,7 +157,7 @@ export async function importSaveJSON(): Promise<void> {
         const text = await file.text();
         const data = JSON.parse(text) as SerializedSave;
         if (!data.cells || !Array.isArray(data.cells)) throw new Error('Invalid save');
-        useVoxelStore.getState().loadSave(data);
+        getVoxelEngine().loadSave(encodeSave(data));
         resolve();
       } catch (e) {
         reject(e);
@@ -166,7 +172,7 @@ export async function importSaveFromUrl(url: string): Promise<boolean> {
     const r = await fetch(url);
     if (!r.ok) return false;
     const data = (await r.json()) as SerializedSave;
-    useVoxelStore.getState().loadSave(data);
+    getVoxelEngine().loadSave(encodeSave(data));
     return true;
   } catch {
     return false;

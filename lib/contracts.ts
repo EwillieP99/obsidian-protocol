@@ -1,5 +1,6 @@
 import type { Contract, BlockId } from '@/types';
 import { useVoxelStore } from '@/stores/voxelStore';
+import { getVoxelEngine } from '@/engine/core/VoxelEngine';
 import { rng, uid, key } from '@/lib/utils';
 import { HALF, WORLD_HEIGHT } from '@/lib/constants';
 
@@ -140,5 +141,8 @@ export function applyContract(c: Contract) {
     if (r() > 0.6) ops.push({ x: dx, y: dy, z: dz, block: 'data-stream' });
   }
 
-  store.applyOps(ops, `Generate ${c.codename}`);
+  getVoxelEngine().applyOps(
+    ops.map((o) => ({ x: o.x, y: o.y, z: o.z, blockId: o.block, layer: o.y })),
+    `Generate ${c.codename}`,
+  );
 }

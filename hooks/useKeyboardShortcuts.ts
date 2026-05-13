@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useUIStore } from '@/stores/uiStore';
 import { useVoxelStore } from '@/stores/voxelStore';
+import { getEngine } from '@/hooks/useEngine';
 import type { BrushMode } from '@/types';
 import { savePromptDialog } from '@/lib/persistence';
 import { generateContract, applyContract } from '@/lib/contracts';
@@ -75,14 +76,14 @@ export function useKeyboardShortcuts() {
       // Undo / Redo
       if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') {
         e.preventDefault();
-        if (e.shiftKey) vx.redo();
-        else vx.undo();
+        if (e.shiftKey) getEngine().redo();
+        else getEngine().undo();
         return;
       }
 
       if ((e.ctrlKey || e.metaKey) && e.code === 'KeyY') {
         e.preventDefault();
-        vx.redo();
+        getEngine().redo();
         return;
       }
 

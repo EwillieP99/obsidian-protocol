@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import type { BrushMode, CameraPreset } from '@/types';
 import { savePromptDialog, exportSaveJSON, importSaveJSONWithLoading } from '@/lib/persistence';
+import { getEngine } from '@/hooks/useEngine';
 import { toast } from 'sonner';
 import { useState } from 'react';
 import { generateContract, applyContract } from '@/lib/contracts';
@@ -40,9 +41,6 @@ export function Toolbar() {
   const setScene = useUIStore((s) => s.setScene);
   const panels = useUIStore((s) => s.panels);
   const togglePanel = useUIStore((s) => s.togglePanel);
-  const undo = useVoxelStore((s) => s.undo);
-  const redo = useVoxelStore((s) => s.redo);
-  const clearAll = useVoxelStore((s) => s.clearAll);
   const setContract = useVoxelStore((s) => s.setContract);
 
   const [savingContract, setSavingContract] = useState(false);
@@ -140,10 +138,10 @@ export function Toolbar() {
 
         {/* History */}
         <div className="flex items-center gap-1 pr-2 border-r border-cyan-neon/20">
-          <motion.button {...tap} className="btn-neon !px-2" onClick={() => undo()} title="Undo (Ctrl+Z)">
+          <motion.button {...tap} className="btn-neon !px-2" onClick={() => getEngine().undo()} title="Undo (Ctrl+Z)">
             <Undo2 size={13} />
           </motion.button>
-          <motion.button {...tap} className="btn-neon !px-2" onClick={() => redo()} title="Redo (Ctrl+Shift+Z)">
+          <motion.button {...tap} className="btn-neon !px-2" onClick={() => getEngine().redo()} title="Redo (Ctrl+Shift+Z)">
             <Redo2 size={13} />
           </motion.button>
           <motion.button
@@ -238,7 +236,7 @@ export function Toolbar() {
             className="btn-neon !px-2 hover:!border-signal-red hover:!text-signal-red"
             onClick={() => {
               if (window.confirm('Purge entire vault?')) {
-                clearAll();
+                getEngine().clearAll();
                 toast.warning('Vault purged.');
               }
             }}
