@@ -235,10 +235,16 @@ components/
                      # PostFX, SceneEffects (particles + shake + flash), FpsTracker
   ui/                # HUD: BootSequence, Toolbar, BlockPalette, LayerPanel,
                      # ShortcutsOverlay, LoadingVeil, HudStream, …
-hooks/               # useKeyboardShortcuts, useEffectBindings
+engine/              # V2 voxel engine (worker-backed canonical state):
+  core/              #   VoxelEngine — IVoxelEngine impl, main-thread orchestrator
+  worker/            #   voxel.worker (canonical state), raycast.worker (DDA queries)
+  bridge/            #   RenderBridge (frame-coalesced GPU writes), WorkerProtocol
+  chunks/            #   Chunk — 16³ bit-packed uint16 cells
+hooks/               # useKeyboardShortcuts, useEffectBindings, useEngine* reads
 lib/                 # blocks, brush, contracts, persistence, audio, utils, constants
 shaders/             # GLSL fragment/vertex strings for shader-driven blocks
-stores/              # Zustand: voxelStore, uiStore, effectsStore (particles/shake/focus)
+stores/              # Zustand: uiStore, effectsStore (UI/effects only — voxel state
+                     # lives in engine/ since Phase 3.5; voxelStore was deleted)
 types/               # All shared TypeScript types
 public/examples/     # Pre-built demo saves
 scripts/             # build-examples.mjs

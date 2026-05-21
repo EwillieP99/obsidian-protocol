@@ -26,18 +26,20 @@ The **V1 autopsy** (`docs/v1_autopsy.md`) identified the core problem: main-thre
 
 | Item | Status |
 |------|--------|
-| Last committed milestone | Phase **3.3 + 3.4** (`2322016`) |
-| Branch | `master`, **5 commits ahead** of `origin/master` |
-| Working tree | **Large uncommitted diff** — Phase 3.5 + Phase 4 appear to live here only |
+| Last committed milestone | Phase **3.5 + 4** (`8f7e9e8`), docs follow-up `0dedff3` |
+| Branch | `master`, **7 commits ahead** of `origin/master` (nothing pushed) |
+| Working tree | Clean except this file's edits — Phases 0–4 are all committed |
 
-Uncommitted changes include:
+Confirmed committed (verified against the repo, not just the working tree):
 
-- `stores/voxelStore.ts` **deleted**
+- `stores/voxelStore.ts` **deleted** — only `uiStore` + `effectsStore` remain
 - UI/scene components migrated to `engine.*` / `useEngine*` hooks
-- New `engine/worker/raycast.worker.ts` (untracked)
-- Updated `VoxelEngine.ts`, `voxel.worker.ts`, `WorkerProtocol.ts`
+- `engine/worker/raycast.worker.ts` present and tracked
+- `VoxelEngine.ts`, `voxel.worker.ts`, `WorkerProtocol.ts` carry the Phase 3.5/4 work
 
-**Risk:** Phase 3.5 and 4 may exist only in the working tree until committed.
+**No at-risk work.** The hard architecture rebuild is committed and safe. The only
+unstarted V2 item is Phase 5 (`engine/persist/obs2.ts` and `compress.worker.ts`
+do not exist yet).
 
 ### V2 phase tracker
 
@@ -45,11 +47,11 @@ Uncommitted changes include:
 |-------|-------------|--------|
 | 0–2 | Engine scaffolding, worker, chunks, protocol | ✅ Committed |
 | 3.1 | RenderBridge + worker re-INIT | ✅ Committed |
-| 3.2 | Worker as mutation authority | ✅ Working tree |
+| 3.2 | Worker as mutation authority | ✅ Committed |
 | 3.3 | `Voxels.tsx` → RenderBridge thin wrapper | ✅ Committed |
 | 3.4 | All mutations → `IVoxelEngine` | ✅ Committed |
-| 3.5 | Retire `voxelStore`; UI reads via engine hooks | ✅ Working tree only |
-| 4 | Raycast worker + `engine.raycast()` | ✅ Working tree only (not wired to pointer input) |
+| 3.5 | Retire `voxelStore`; UI reads via engine hooks | ✅ Committed (`8f7e9e8`) |
+| 4 | Raycast worker + `engine.raycast()` | ✅ Committed (`8f7e9e8`) — not wired to pointer input |
 | 5 | OBS2 binary persistence + `compress.worker` | ❌ Not started |
 
 ### What's working well
@@ -82,15 +84,15 @@ Key wins:
 
 3. **No automated tests** — zero test files in the repo.
 
-4. **Documentation out of sync:**
+4. **Documentation out of sync** (re-verified 2026-05-20):
 
    | File | Problem |
    |------|---------|
-   | `docs/README (1).md` | Stuck at Phase 3.1, May 10 |
-   | `docs/technical-architecture.md` | Phase table vs body disagree on 4/5 |
-   | `docs/voxel-engine.md` | Says Phase 4 complete (matches working tree) |
-   | `docs/how-to-extend.md` | Still points to `stores/voxelStore.ts` |
-   | Root `README.md` | Lists `voxelStore`; no `engine/` folder |
+   | `docs/README (1).md` | Stuck at Phase 3.1, May 10; also has the awkward ` (1)` filename |
+   | `docs/technical-architecture.md` | Stale (dated 2026-05-13, baseline `2322016`); file map still lists `raycast.worker.ts` as "Future: Phase 4" though Phase 4 is done |
+   | `docs/voxel-engine.md` | ✅ Accurate — correctly shows 3.5 ✅, 4 ✅, 5 ⏳. The most current doc; use it as the source of truth |
+   | `docs/how-to-extend.md` | No longer references `voxelStore` (earlier claim was outdated); spot-check for other engine-migration gaps |
+   | Root `README.md` | ✅ Fixed 2026-05-20 — `engine/` added, `voxelStore` removed from structure |
 
 5. **README roadmap items not built:** Liveblocks, WebXR, WebGPU, glTF export, greedy meshing.
 
@@ -120,13 +122,21 @@ flowchart TD
 
 ### Step 1 — Stabilize (do first)
 
+**What “validate the perf fix” means (plain English):**  
+V1 would *stutter or freeze* when you painted, undid, or loaded big builds (~800+ blocks) — even if the FPS counter still looked fine. V2 moved that work off the main thread. This check is: *does it feel smooth now on a big example?*
+
+**How to do it (~2 min):**
+
+1. Run `npm run dev` → open http://localhost:3000
+2. Skip or click through the boot sequence
+3. Bottom-left panel → click **BLACKSPIRE ARCOLOGY** (3,119 blocks)
+4. Paint a large area (brush size up with `]`), erase, then **Ctrl+Z** undo a few times
+5. **Feel test:** no noticeable freeze/hitch while doing the above
+6. **Optional DevTools check:** F12 → Performance tab → Record while painting → stop. Look for red/long tasks on the main thread. V1 had 80–200ms spikes; V2 should stay mostly under ~16ms for interaction frames.
+
 - [x] **Commit the working tree** — `8f7e9e8` *Phase 3.5 + 4: retire voxelStore, engine hooks, raycast worker*
-- [x] **Validate** — `npm run typecheck` and `npm run build` both pass (2026-05-20)
-- [ ] **Manual perf check** (the original P0 fix):
-  - Load **Blackspire Arcology** (~3,100 voxels)
-  - Large brush strokes, undo/redo, contract load
-  - Chrome DevTools Performance: no 80–200ms long tasks
-  - Compare HIGH vs BALANCED presets
+- [x] **Validate build** — `npm run typecheck` and `npm run build` both pass (2026-05-20)
+- [ ] **Perf check** — load Blackspire, stress paint/undo; confirm no V1-style hitches (see above)
 
 If hitches remain, profile before new features. Likely culprits: brush expansion on main thread, `getAllCells()` on save, JSON serialize on large vaults.
 
@@ -153,9 +163,9 @@ Don't prioritize unless perf data supports it.
 | File | Action |
 |------|--------|
 | Rename `docs/README (1).md` → `docs/README.md` | Wiki index with current phase table |
-| `docs/technical-architecture.md` | Mark phases 3.5 + 4 done; Phase 5 next |
-| `docs/how-to-extend.md` | Replace `voxelStore` with `engine/` + hooks |
-| Root `README.md` | Add `engine/` to structure; remove `voxelStore` |
+| `docs/technical-architecture.md` | Mark phases 3.5 + 4 done; update file map (no "Future" raycast.worker); Phase 5 next |
+| `docs/how-to-extend.md` | Spot-check for engine-migration gaps (no longer references `voxelStore`) |
+| ~~Root `README.md` — add `engine/`, remove `voxelStore`~~ | ✅ Done 2026-05-20 |
 | Root `README.md` roadmap | Split "V2 engine" vs "product roadmap" |
 
 Optional root **STATUS.md** one-liner for quick orientation.
