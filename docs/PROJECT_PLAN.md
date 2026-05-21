@@ -2,7 +2,7 @@
 
 **Saved:** 2026-05-20  
 **Purpose:** Review snapshot of project status, documentation gaps, and recommended path forward.  
-**Status when written:** V2 engine rebuild in progress; large uncommitted working tree (Phases 3.5 + 4).
+**Status when written:** V2 Phases 0–4 committed (`8f7e9e8`); Step 1 perf check still pending.
 
 ---
 
@@ -120,18 +120,13 @@ flowchart TD
 
 ### Step 1 — Stabilize (do first)
 
-1. **Commit the working tree**, e.g.:
-   - `Phase 3.5: retire voxelStore, migrate UI to engine hooks`
-   - `Phase 4: raycast worker + engine.raycast() API`
-2. **Validate:**
-   ```bash
-   npm run typecheck && npm run build
-   ```
-3. **Manual perf check** (the original P0 fix):
-   - Load **Blackspire Arcology** (~3,100 voxels)
-   - Large brush strokes, undo/redo, contract load
-   - Chrome DevTools Performance: no 80–200ms long tasks
-   - Compare HIGH vs BALANCED presets
+- [x] **Commit the working tree** — `8f7e9e8` *Phase 3.5 + 4: retire voxelStore, engine hooks, raycast worker*
+- [x] **Validate** — `npm run typecheck` and `npm run build` both pass (2026-05-20)
+- [ ] **Manual perf check** (the original P0 fix):
+  - Load **Blackspire Arcology** (~3,100 voxels)
+  - Large brush strokes, undo/redo, contract load
+  - Chrome DevTools Performance: no 80–200ms long tasks
+  - Compare HIGH vs BALANCED presets
 
 If hitches remain, profile before new features. Likely culprits: brush expansion on main thread, `getAllCells()` on save, JSON serialize on large vaults.
 
