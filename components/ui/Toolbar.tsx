@@ -2,7 +2,7 @@
 
 import { motion } from 'framer-motion';
 import { useUIStore } from '@/stores/uiStore';
-import { useVoxelStore } from '@/stores/voxelStore';
+import { getEngine } from '@/hooks/useEngine';
 import {
   Brush, Eraser, PaintBucket, Replace, Pipette,
   Camera, Layers, Clock, FileSignature,
@@ -10,7 +10,6 @@ import {
 } from 'lucide-react';
 import type { BrushMode, CameraPreset } from '@/types';
 import { savePromptDialog, exportSaveJSON, importSaveJSONWithLoading } from '@/lib/persistence';
-import { getEngine } from '@/hooks/useEngine';
 import { toast } from 'sonner';
 import { useState } from 'react';
 import { generateContract, applyContract } from '@/lib/contracts';
@@ -41,15 +40,13 @@ export function Toolbar() {
   const setScene = useUIStore((s) => s.setScene);
   const panels = useUIStore((s) => s.panels);
   const togglePanel = useUIStore((s) => s.togglePanel);
-  const setContract = useVoxelStore((s) => s.setContract);
-
   const [savingContract, setSavingContract] = useState(false);
 
   const handleNewContract = async () => {
     setSavingContract(true);
     try {
       const c = generateContract();
-      setContract(c);
+      getEngine().setContract(c);
       applyContract(c);
       toast.success('CONTRACT ASSIGNED', {
         description: `${c.codename} — ${c.client}`,

@@ -2,7 +2,6 @@
 
 import { useEffect } from 'react';
 import { useUIStore } from '@/stores/uiStore';
-import { useVoxelStore } from '@/stores/voxelStore';
 import { getEngine } from '@/hooks/useEngine';
 import type { BrushMode } from '@/types';
 import { savePromptDialog } from '@/lib/persistence';
@@ -26,7 +25,6 @@ export function useKeyboardShortcuts() {
       if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) return;
 
       const ui = useUIStore.getState();
-      const vx = useVoxelStore.getState();
 
       // Shortcuts overlay — `?` (Shift+/) or `/`
       if ((e.key === '?' || e.key === '/') && !e.ctrlKey && !e.metaKey) {
@@ -66,7 +64,7 @@ export function useKeyboardShortcuts() {
       // Contracts
       if (e.code === 'KeyN' && !e.ctrlKey && !e.metaKey) {
         const c = generateContract();
-        vx.setContract(c);
+        getEngine().setContract(c);
         applyContract(c);
         toast.success('CONTRACT ASSIGNED', { description: `${c.codename} — ${c.client}` });
         ui.setPanel('contract', true);

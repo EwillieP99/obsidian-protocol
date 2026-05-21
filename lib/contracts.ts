@@ -1,5 +1,4 @@
 import type { Contract, BlockId } from '@/types';
-import { useVoxelStore } from '@/stores/voxelStore';
 import { getVoxelEngine } from '@/engine/core/VoxelEngine';
 import { rng, uid, key } from '@/lib/utils';
 import { HALF, WORLD_HEIGHT } from '@/lib/constants';
@@ -64,12 +63,10 @@ export function generateContract(seed = Date.now()): Contract {
 export function applyContract(c: Contract) {
   const r = rng(c.seed);
   const ops: Array<{ x: number; y: number; z: number; block: BlockId | null }> = [];
-  const store = useVoxelStore.getState();
 
-  // Clear existing first as a single op batch
-  for (const k of store.cells.keys()) {
-    const [x, y, z] = k.split(',').map(Number);
-    ops.push({ x, y, z, block: null });
+  // Clear existing cells first as a single op batch.
+  for (const d of getVoxelEngine().getAllCells()) {
+    ops.push({ x: d.x, y: d.y, z: d.z, block: null });
   }
 
   // Variant by hazard level

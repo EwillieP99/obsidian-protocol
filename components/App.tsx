@@ -21,7 +21,7 @@ import { useEffectBindings } from '@/hooks/useEffectBindings';
 import { useEngine } from '@/hooks/useEngine';
 import { useUIStore } from '@/stores/uiStore';
 import { autoSave, loadAutoSave } from '@/lib/persistence';
-import { useVoxelStore } from '@/stores/voxelStore';
+import { getEngine } from '@/hooks/useEngine';
 
 // Scene is client-only because R3F + WebGL requires a browser context.
 const Scene = dynamic(() => import('@/components/scene/Scene').then((m) => m.Scene), {
@@ -53,7 +53,7 @@ export default function App() {
   // Periodic autosave (every 20s, only when there are blocks).
   useEffect(() => {
     const id = setInterval(() => {
-      if (useVoxelStore.getState().cells.size > 0) autoSave();
+      if (getEngine().getStats().cellCount > 0) autoSave();
     }, 20_000);
     return () => clearInterval(id);
   }, []);

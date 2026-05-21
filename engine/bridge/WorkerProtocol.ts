@@ -51,10 +51,14 @@ export interface ChunkExport {
 
 /**
  * Occupancy delta pushed from voxel.worker to raycast.worker over their
- * dedicated MessageChannel. The buffer holds packed (cellIdx, occupied) pairs.
+ * dedicated MessageChannel. The buffer holds packed (cellIdx, blockIndex) pairs.
  *
- * Layout: Uint32Array view of `buffer`. Even indices = cellIdx, odd indices =
- * 0 (cleared) or 1 (set). Length is therefore always even.
+ * Layout: Uint32Array view of `buffer`. Even indices = cellIdx (from
+ * `cellLinearIdx(x,y,z)`), odd indices = the new BlockIndex at that cell
+ * (0 = cleared / air, non-zero = the block now present). Length is always even.
+ *
+ * The raycast worker uses the blockIndex both as occupancy (any non-zero =
+ * solid) and as the value to return in `WireRayHit.blockIndex` on hit.
  */
 export interface OccupancyDelta {
   version: number; // monotonic; raycast worker drops stale messages
@@ -128,7 +132,7 @@ export type VoxelToMainMsg =
   | { type: 'READY' }
   | { type: 'PATCH'; deltas: WireDelta[]; label: string; requestId?: number }
   | { type: 'STATS'; stats: EngineStats }
-  | { type: 'CHRONO'; entries: ChronoEntry[] }
+  | { type: 'CHRONO'; entries: ChronoEntry[]; futureEntries: ChronoEntry[] }
   | { type: 'LAYERS'; layers: LayerMeta[]; activeLayer: number }
   | {
       type: 'SERIALIZED_RAW';

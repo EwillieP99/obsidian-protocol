@@ -1,12 +1,10 @@
 'use client';
 
 import { get, set, del, keys } from 'idb-keyval';
-import { useVoxelStore } from '@/stores/voxelStore';
 import { useUIStore } from '@/stores/uiStore';
 import { getVoxelEngine } from '@/engine/core/VoxelEngine';
 import type { SerializedSave } from '@/types';
 import { SAVE_DB_KEY, AUTOSAVE_KEY } from '@/lib/constants';
-import { unkey } from '@/lib/utils';
 
 function encodeSave(data: SerializedSave): ArrayBuffer {
   const bytes = new TextEncoder().encode(JSON.stringify(data));
@@ -17,11 +15,9 @@ async function withLoading<T>(message: string, fn: () => Promise<T>): Promise<T>
   const ui = useUIStore.getState();
   ui.setLoading(message);
   try {
-    // Allow paint of veil before the heavy work begins.
     await new Promise<void>((r) => requestAnimationFrame(() => r()));
     return await fn();
   } finally {
-    // Hold a beat so users perceive the transition rather than a jarring cut.
     setTimeout(() => useUIStore.getState().setLoading(null), 240);
   }
 }
@@ -29,13 +25,19 @@ async function withLoading<T>(message: string, fn: () => Promise<T>): Promise<T>
 const SAVE_PREFIX = 'save:';
 
 export function buildSerialized(name: string, thumbnail?: string): SerializedSave {
-  const store = useVoxelStore.getState();
+  const engine = getVoxelEngine();
   const cells: SerializedSave['cells'] = [];
-  for (const [k, b] of store.cells.entries()) {
-    const [x, y, z] = unkey(k);
-    cells.push([x, y, z, b]);
+  let mnx = Infinity, mny = Infinity, mnz = Infinity;
+  let mxx = -Infinity, mxy = -Infinity, mxz = -Infinity;
+  for (const d of engine.getAllCells()) {
+    if (d.newBlockId === null) continue;
+    cells.push([d.x, d.y, d.z, d.newBlockId]);
+    if (d.x < mnx) mnx = d.x; if (d.y < mny) mny = d.y; if (d.z < mnz) mnz = d.z;
+    if (d.x > mxx) mxx = d.x; if (d.y > mxy) mxy = d.y; if (d.z > mxz) mxz = d.z;
   }
-  const bounds = store.computeBounds() ?? { min: [0, 0, 0] as [number, number, number], max: [0, 0, 0] as [number, number, number] };
+  const bounds = cells.length
+    ? { min: [mnx, mny, mnz] as [number, number, number], max: [mxx, mxy, mxz] as [number, number, number] }
+    : { min: [0, 0, 0] as [number, number, number], max: [0, 0, 0] as [number, number, number] };
   return {
     version: 1,
     name,
@@ -43,9 +45,9 @@ export function buildSerialized(name: string, thumbnail?: string): SerializedSav
     updatedAt: Date.now(),
     thumbnail,
     bounds,
-    layers: store.layers,
+    layers: engine.getLayers(),
     cells,
-    contract: store.contract ?? undefined,
+    contract: engine.getContract() ?? undefined,
   };
 }
 

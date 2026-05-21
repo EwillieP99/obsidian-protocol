@@ -1,17 +1,16 @@
 'use client';
 
-import { useVoxelStore } from '@/stores/voxelStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { useEngineStats } from '@/hooks/useEngine';
 
 export function IntegrityMeter() {
-  const integrity = useVoxelStore((s) => s.computeIntegrity());
+  const { integrity } = useEngineStats();
   const setScene = useUIStore((s) => s.setScene);
   const setAlert = useUIStore((s) => s.setAnomalyAlert);
   const alert = useUIStore((s) => s.anomalyAlert);
 
-  // When integrity drops, kick the glitch postprocess on briefly.
   useEffect(() => {
     if (integrity < 0.4) {
       setScene({ glitchEffect: true });
@@ -48,7 +47,6 @@ export function IntegrityMeter() {
           animate={{ width: `${pct}%` }}
           transition={{ type: 'spring', stiffness: 120, damping: 20 }}
         />
-        {/* Tick marks */}
         <div className="absolute inset-0 flex">
           {Array.from({ length: 10 }).map((_, i) => (
             <div key={i} className="flex-1 border-r border-void/60 last:border-r-0" />

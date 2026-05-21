@@ -4,7 +4,6 @@ import * as THREE from 'three';
 import { useCallback, useMemo, useRef } from 'react';
 import { ThreeEvent } from '@react-three/fiber';
 import { useUIStore } from '@/stores/uiStore';
-import { useVoxelStore } from '@/stores/voxelStore';
 import { useEffectsStore } from '@/stores/effectsStore';
 import { getEngine } from '@/hooks/useEngine';
 import { brushCells, operationsForBrush } from '@/lib/brush';
@@ -55,10 +54,9 @@ export function Interaction({ children }: { children: React.ReactNode }) {
   const apply = useCallback((cell: [number, number, number]) => {
     const [cx, cy, cz] = cell;
     const { brush, activeBlock } = useUIStore.getState();
-    const store = useVoxelStore.getState();
 
     if (brush.mode === 'eyedropper') {
-      const cur = store.getBlock(cx, cy, cz);
+      const cur = getEngine().getBlock(cx, cy, cz);
       if (cur) {
         useUIStore.getState().setActiveBlock(cur);
         toast.success(`Sampled ${cur}`, { description: 'Block injected into active palette slot.' });
@@ -71,9 +69,9 @@ export function Interaction({ children }: { children: React.ReactNode }) {
     const effectiveMode =
       dragMode.current === 'erase' ? 'erase' : brush.mode;
 
-    let pickReplaceTarget: ReturnType<typeof store.getBlock> | undefined;
+    let pickReplaceTarget: import('@/types').BlockId | undefined;
     if (effectiveMode === 'replace') {
-      pickReplaceTarget = store.getBlock(cx, cy, cz);
+      pickReplaceTarget = getEngine().getBlock(cx, cy, cz);
       if (!pickReplaceTarget) return;
     }
 
@@ -81,7 +79,7 @@ export function Interaction({ children }: { children: React.ReactNode }) {
       inBoundsFiltered,
       activeBlock,
       effectiveMode,
-      (x, y, z) => store.getBlock(x, y, z),
+      (x, y, z) => getEngine().getBlock(x, y, z),
       pickReplaceTarget,
     );
     if (ops.length) {

@@ -1,15 +1,17 @@
 # Voxel Engine Deep Dive
 
-The voxel engine is the technical heart of Obsidian Protocol. V2 is a from-scratch rebuild that moves all voxel state off the main thread; V1 is preserved as a fallback / read-cache while the migration finishes.
+The voxel engine is the technical heart of Obsidian Protocol. V2 is a from-scratch rebuild that moves all voxel state off the main thread. V1 is fully retired as of Phase 3.5.
 
-> **Status — 2026-05-13 — commit `2322016`**
+> **Status — 2026-05-13**
 >
 > - ✅ **Phases 0–2** (`5f215f9`): engine scaffolding, worker stand-up, chunk model, `RenderBridge` built, worker re-INIT path wired
-> - ✅ **Phase 3.1** (`2d42765`): `RenderBridge` instantiated; worker seeds from voxelStore on INIT
+> - ✅ **Phase 3.1** (`2d42765`): `RenderBridge` instantiated; worker seeds from store on INIT
 > - ✅ **Phase 3.3** (`2322016`): `Voxels.tsx` rewritten as RenderBridge thin wrapper — no more `useEffect([revision])` full-rebuild
-> - ✅ **Phase 3.4** (`2322016`): All mutation sites (`Interaction`, `Toolbar`, `HistoryPanel`, keyboard shortcuts, `persistence`, `contracts`) now call `engine.*` instead of `voxelStore.*`
-> - ⏳ **Phase 3.2** (next): Flip `VoxelEngine` so mutations post to the worker directly; worker `PATCH/STATS/CHRONO/LAYERS` replies drive the event bus; shadow-write voxelStore from those replies. Retires the `storeUnsub`.
-> - ⏳ **Phase 3.5** (after 3.2): Delete `voxelStore` once all UI reads go through `engine.*`
+> - ✅ **Phase 3.4** (`2322016`): All mutation sites now call `engine.*`
+> - ✅ **Phase 3.2**: Mutations post to worker directly; `PATCH/STATS/CHRONO/LAYERS` replies drive the event bus; `storeUnsub` retired
+> - ✅ **Phase 3.5**: `voxelStore` deleted — all UI reads go through engine hooks (`useEngineStats`, `useEngineLayers`, `useEngineChrono`, `useEngineContract`, `useLayerCounts`)
+> - ✅ **Phase 4**: `raycast.worker.ts` stood up; `engine.raycast()` answers via Amanatides–Woo DDA against a `Uint8Array(WORLD_SIZE² × WORLD_Y_ROUNDED)` blockIndex grid. voxel.worker pushes `OCCUPANCY_DELTA` pairs over a dedicated `MessageChannel` after every mutation (and a snapshot at INIT). UI still uses R3F raycasting for pointer events; `engine.raycast()` is now available for non-pointer queries (gameplay logic, AI agents, etc.).
+> - ⏳ **Phase 5**: OBS2 binary serialization via compress.worker; retire V1 JSON `serialize()` path
 >
 > See [V1 Autopsy](v1_autopsy.md) for the original problem statement.
 
@@ -26,9 +28,11 @@ The V2 engine is three layers connected by a typed message protocol:
 │                                                          │  │                  │
 │   RenderBridge ◄── 'patch' event ◄── VoxelEngine ◄───────┼──│  chunks Map      │
 │         │                                                │  │  chronoLog       │
-│         ▼                                                │  │  layers          │
-│   InstancedMesh × 12 (pre-allocated MAX_INSTANCES)       │  │  stats counters  │
-│                                                          │  │                  │
+│         ▼                                                │  │  future stack    │
+│   InstancedMesh × 12 (pre-allocated MAX_INSTANCES)       │  │  layers          │
+│                                                          │  │  stats counters  │
+│   UI hooks ◄── 'stats'/'layers'/'chrono'/'contract' ◄────┼──│                  │
+│   (useEngineStats, useEngineLayers, …)                   │  │                  │
 └──────────────────────────────────────────────────────────┘  └──────────────────┘
 ```
 
@@ -46,7 +50,7 @@ interface IVoxelEngine {
   clearAll(): void;
   loadSave(data: ArrayBuffer): void;
 
-  // Layer control
+  // Layer control ('layers' event fires on completion)
   setActiveLayer(id: number): void;
   setLayerVisibility(id: number, visible: boolean): void;
   setLayerLock(id: number, locked: boolean): void;
@@ -55,28 +59,47 @@ interface IVoxelEngine {
   moveLayer(from: number, to: number): void;
   renameLayer(id: number, name: string): void;
 
-  // Sync reads (cached; safe per frame)
+  // Sync reads (main-thread cache; safe per frame)
   getStats(): EngineStats;
-  getChronoEntries(): ChronoEntry[];
+  getChronoEntries(): ChronoEntry[];   // undo history
+  getChronoFuture(): ChronoEntry[];    // redo stack
   getLayers(): LayerMeta[];
   getActiveLayer(): number;
+  getBlock(x: number, y: number, z: number): BlockId | undefined;
 
   // Async I/O
   serialize(): Promise<ArrayBuffer>;
   raycast(origin, direction): Promise<RaycastResult | null>;
+
+  // Bulk read (initial bridge seed)
+  getAllCells(): CellDelta[];
 
   // Lifecycle + subscriptions
   init(): Promise<void>;
   dispose(): void;
   on<T>(event: T, handler): () => void;
 
-  // Contract pass-through
+  // Contract
   getContract(): Contract | null;
   setContract(c: Contract | null): void;
 }
 ```
 
-Engine events: `'patch' | 'stats' | 'chrono' | 'layers' | 'ready' | 'error'`. All typed via a discriminated union; subscribers get type-narrowed payloads.
+Engine events: `'patch' | 'stats' | 'chrono' | 'layers' | 'contract' | 'ready' | 'error'`. All typed via a discriminated union; subscribers get type-narrowed payloads. The `'chrono'` event carries both `entries` (undo history) and `futureEntries` (redo stack). The `'layers'` event carries `activeLayer` alongside the layers array.
+
+### React hooks
+
+`hooks/useEngine.ts` exposes reactive hooks that subscribe to engine events and return state:
+
+| Hook | Event | Returns |
+|---|---|---|
+| `useEngineStats()` | `'stats'` | `EngineStats` (cellCount, integrity, anomaly, …) |
+| `useEngineLayers()` | `'layers'` | `{ layers: LayerMeta[], activeLayer: number }` |
+| `useEngineChrono()` | `'chrono'` | `{ entries: ChronoEntry[], futureEntries: ChronoEntry[] }` |
+| `useEngineContract()` | `'contract'` | `Contract \| null` |
+| `useLayerCounts()` | `'patch'` | `Map<layerId, count>` (incremental) |
+
+These hooks replace what was previously scattered across `useVoxelStore(...)` selectors in every UI component.
 
 ### The chunk model
 
@@ -97,7 +120,7 @@ Chunks live in a sparse `Map<chunkKey, Chunk>` inside the worker. Empty chunks a
 
 ### The worker
 
-`engine/worker/voxel.worker.ts` owns:
+`engine/worker/voxel.worker.ts` owns all canonical voxel state:
 
 - `chunks: Map<chunkKey, Chunk>`
 - `chronoLog: WorkerPatchEntry[]` — undo stack of delta records (not snapshots)
@@ -110,7 +133,7 @@ Chunks live in a sparse `Map<chunkKey, Chunk>` inside the worker. Empty chunks a
 
 **Inbound messages:** `INIT`, `APPLY_OPS`, `UNDO`, `REDO`, `JUMP_TO_CHRONO`, `CLEAR_ALL`, `SET_LAYER_*`, `MOVE_LAYER`, `RENAME_LAYER`, `SET_ACTIVE_LAYER`, `SET_CONTRACT`, `TICK_STATS`, `DISPOSE`. (Plus `SERIALIZE` and `LOADED_CHUNKS` stubs for Phase 5.)
 
-**Outbound messages:** `READY`, `PATCH`, `STATS`, `CHRONO`, `LAYERS`, `SERIALIZED_RAW`, `ERROR`. `PATCH` payload is a `WireDelta[]` — one entry per changed cell — applied to the GPU on the next frame.
+**Outbound messages:** `READY`, `PATCH`, `STATS`, `CHRONO`, `LAYERS`, `SERIALIZED_RAW`, `ERROR`. `PATCH` payload is a `WireDelta[]` — one entry per changed cell — applied to the GPU on the next frame. `CHRONO` carries both `entries` and `futureEntries`.
 
 `INIT` always (re-)seeds the worker. Sending another `INIT` with new `seedCells` is the load-vault path; no fresh worker process needed.
 
@@ -124,7 +147,6 @@ Chunks live in a sparse `Map<chunkKey, Chunk>` inside the worker. Empty chunks a
 - **Per-layer re-bake.** Local `cellMeta: Map<cellIdx, CellRecord>` and `layerCells: Map<layerId, Set<cellIdx>>`. When `setLayers()` detects visibility/opacity/solo changes, only the affected layers' cells are re-baked. Cost: O(cells in changed layers), not O(all cells).
 - **Hidden cells.** Layers with `visible=false` or excluded by solo collapse via `ZERO_MATRIX` (zero scale). No alpha state changes.
 - **Transparent blocks.** `data-stream` has `transparent: true`, `depthWrite: false`, `renderOrder: 1` — drawn after opaque geometry to avoid z-fighting.
-- **Materials and geometry are identical to V1.** Same `buildShaderMaterial` / `buildStandardMaterial` logic. Same `boundingSphere` override for world-bounds frustum culling. Same shared `uTime` uniform pattern (updated in `Voxels.tsx`'s `SharedShaderClock`).
 
 ### The wire format
 
@@ -146,9 +168,10 @@ Large payloads (occupancy deltas for Phase 4 raycast worker, OBS2 buffers for Ph
 | `engine/bridge/WorkerProtocol.ts` | Discriminated unions for every worker message |
 | `engine/bridge/RenderBridge.ts` | `SlotAllocator` + 12 InstancedMesh + frame-coalesced flush |
 | `engine/chunks/Chunk.ts` | Uint16Array[4096] chunk + pack/unpack helpers |
-| `engine/core/VoxelEngine.ts` | Main-thread singleton; spawns + seeds the worker; event emitter |
-| `engine/worker/voxel.worker.ts` | Canonical state; APPLY_OPS / UNDO / REDO / etc. handlers |
-| `hooks/useEngine.ts` | React access point — `useEngine()` and `getEngine()` |
+| `engine/core/VoxelEngine.ts` | Main-thread singleton; spawns workers; opens voxel↔raycast `MessageChannel`; event emitter; main-thread caches (localCells, layersCache, statsCache, …) |
+| `engine/worker/voxel.worker.ts` | Canonical state; APPLY_OPS / UNDO / REDO / etc. handlers; pushes `OCCUPANCY_DELTA` over the raycast port on every mutation |
+| `engine/worker/raycast.worker.ts` | `Uint8Array(worldX·worldY·worldZ)` blockIndex grid kept in sync via `OCCUPANCY_DELTA`; answers `RAY_QUERY` with Amanatides–Woo DDA |
+| `hooks/useEngine.ts` | `useEngine()`, `getEngine()`, and reactive hooks: `useEngineStats`, `useEngineLayers`, `useEngineChrono`, `useEngineContract`, `useLayerCounts` |
 | `lib/blocks.ts` | `BLOCK_TYPES`, `BLOCK_ORDER`, **append-only** `BLOCK_INDEX_TABLE` |
 
 ---
@@ -180,23 +203,28 @@ V1 was a 1-hour Claude Code build. Its design choices that V2 **preserved**:
 
 What V2 **changed**:
 
-- V1's `Voxels.tsx > InstancedGroup` ran `useEffect([cells, revision, layerRevision])` which walked the entire cells Map on every change and rebuilt every mesh's instance buffer. This was the main-thread thrash above ~800 voxels.
-- V1's `voxelStore` (Zustand) owned the cells Map directly on the main thread. V2 moves canonical cells into the worker and demotes `voxelStore` to a shadow read cache.
+- V1's `Voxels.tsx > InstancedGroup` ran `useEffect([cells, revision, layerRevision])` which walked the entire cells Map on every change and rebuilt every mesh's instance buffer. **Eliminated in Phase 3.3.**
+- V1's `voxelStore` (Zustand) owned the cells Map directly on the main thread. **Deleted in Phase 3.5.** Canonical cells live in `voxel.worker.ts`; a `localCells: Map<string, BlockId>` in `VoxelEngine` mirrors them for sync reads.
 - V1's brush operations (`brushCells` + `operationsForBrush`) ran fully on the main thread before the store update. V2 still expands brush on main thread for low-latency preview (`Cursor.tsx`), but the chunk write, chrono push, and stats update all happen in the worker.
 
 | File | Role | V2 status |
 |---|---|---|
-| `stores/voxelStore.ts` | All voxel data, layers, history, contracts | ⚠ Shadow read cache (Phase 3.4 done) — retired in Phase 3.5 |
+| `stores/voxelStore.ts` | All voxel data, layers, history, contracts | 🗑 Deleted (Phase 3.5) |
 | `components/scene/Voxels.tsx` | Per-blockId InstancedMesh + full-rebuild useEffect | ✅ RenderBridge thin wrapper (Phase 3.3) |
-| `components/scene/Interaction.tsx` | Pointer-to-cell + brush ops + `voxelStore.applyOps` | ✅ `engine.applyOps` (Phase 3.4) |
+| `components/scene/Interaction.tsx` | Pointer-to-cell + brush ops + `voxelStore.applyOps` | ✅ `engine.applyOps` + `engine.getBlock` (Phase 3.4 / 3.5) |
 | `hooks/useKeyboardShortcuts.ts` | Undo/redo → voxelStore | ✅ `engine.undo/redo` (Phase 3.4) |
-| `components/ui/Toolbar.tsx` | Undo/redo/clear → voxelStore | ✅ engine (Phase 3.4) |
-| `components/ui/HistoryPanel.tsx` | History display + undo/redo → voxelStore | ✅ engine (Phase 3.4) |
-| `lib/persistence.ts` | loadSave → voxelStore directly | ✅ `engine.loadSave()` (Phase 3.4) |
-| `lib/contracts.ts` | applyContract → `store.applyOps` | ✅ `engine.applyOps` (Phase 3.4) |
+| `components/ui/Toolbar.tsx` | Undo/redo/clear → voxelStore | ✅ engine (Phase 3.4 / 3.5) |
+| `components/ui/HistoryPanel.tsx` | History display from voxelStore | ✅ `useEngineChrono()` (Phase 3.5) |
+| `components/ui/LayerPanel.tsx` | Layer display + mutations → voxelStore | ✅ `useEngineLayers()` + `useLayerCounts()` + engine mutations (Phase 3.5) |
+| `components/ui/StatusBar.tsx` | `cells.size` + `computeIntegrity()` from voxelStore | ✅ `useEngineStats()` (Phase 3.5) |
+| `components/ui/IntegrityMeter.tsx` | `computeIntegrity()` from voxelStore | ✅ `useEngineStats()` (Phase 3.5) |
+| `components/ui/ContractPanel.tsx` | `contract` from voxelStore | ✅ `useEngineContract()` (Phase 3.5) |
+| `hooks/useEffectBindings.ts` | voxelStore revision subscription → particles/audio | ✅ engine `'patch'` event subscription (Phase 3.5) |
+| `lib/persistence.ts` | `buildSerialized` read from voxelStore | ✅ reads from engine (Phase 3.5) |
+| `lib/contracts.ts` | `applyContract` clear via `store.cells` | ✅ `engine.getAllCells()` (Phase 3.5) |
 | `lib/blocks.ts` | Block definitions + stats | Extended with `BLOCK_INDEX_TABLE` for V2 wire format |
 | `lib/brush.ts` | Brush shape + operation generation | Unchanged — still used for preview + pre-engine op expansion |
 
 ---
 
-*Last updated: 2026-05-13. Commit baseline: `2322016`.*
+*Last updated: 2026-05-13. Phase 4 complete.*

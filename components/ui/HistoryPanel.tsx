@@ -2,17 +2,14 @@
 
 import { motion, AnimatePresence } from 'framer-motion';
 import { useUIStore } from '@/stores/uiStore';
-import { useVoxelStore } from '@/stores/voxelStore';
-import { useEffectsStore } from '@/stores/effectsStore';
-import { getEngine } from '@/hooks/useEngine';
+import { getEngine, useEngineChrono } from '@/hooks/useEngine';
 import { fmtTime } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 
 export function HistoryPanel() {
   const open = useUIStore((s) => s.panels.history);
   const togglePanel = useUIStore((s) => s.togglePanel);
-  const history = useVoxelStore((s) => s.history);
-  const future = useVoxelStore((s) => s.future);
+  const { entries: history, futureEntries: future } = useEngineChrono();
   const recentId = history[history.length - 1]?.id;
 
   return (
@@ -48,7 +45,7 @@ export function HistoryPanel() {
                   Awaiting first neural impulse…
                 </div>
               )}
-              {history.map((h, i) => {
+              {history.map((h) => {
                 const isCurrent = h.id === recentId;
                 return (
                   <motion.button
@@ -57,21 +54,18 @@ export function HistoryPanel() {
                     animate={isCurrent ? { boxShadow: ['0 0 0px rgba(0,249,255,0)', '0 0 14px rgba(0,249,255,0.55)', '0 0 0px rgba(0,249,255,0)'] } : { boxShadow: '0 0 0px rgba(0,249,255,0)' }}
                     transition={{ duration: 0.6 }}
                     whileHover={{ scale: 1.04 }}
-                    onClick={() => {
-                      useEffectsStore.getState().highlightCells(h.patch.map(([k]) => k).slice(0, 96), '#00f9ff', 600);
-                      getEngine().jumpToChrono(h.id);
-                    }}
+                    onClick={() => getEngine().jumpToChrono(h.id)}
                     className={cn(
                       'flex flex-col items-center gap-0.5 px-2 py-1 border min-w-[64px]',
                       isCurrent
                         ? 'border-cyan-neon bg-cyan-neon/10'
                         : 'border-cyan-neon/25 hover:border-cyan-neon/70 hover:bg-cyan-neon/5 transition-colors',
                     )}
-                    title={`${h.label} · ${fmtTime(h.timestamp)} · ${h.patch.length} cells`}
+                    title={`${h.label} · ${fmtTime(h.timestamp)} · ${h.opCount} cells`}
                   >
                     <div className="terminal text-[10px] neon-text-cyan truncate w-full">{h.label}</div>
                     <div className="terminal text-[9px] text-cyan-glow/50">{fmtTime(h.timestamp)}</div>
-                    <div className="terminal text-[8px] text-cyan-glow/65">Δ{h.patch.length}</div>
+                    <div className="terminal text-[8px] text-cyan-glow/65">Δ{h.opCount}</div>
                   </motion.button>
                 );
               })}
@@ -90,7 +84,7 @@ export function HistoryPanel() {
                 >
                   <div className="terminal text-[10px] neon-text-magenta truncate w-full">{h.label}</div>
                   <div className="terminal text-[9px] text-magenta-glow/50">{fmtTime(h.timestamp)}</div>
-                  <div className="terminal text-[8px] text-magenta-glow/65">Δ{h.patch.length}</div>
+                  <div className="terminal text-[8px] text-magenta-glow/65">Δ{h.opCount}</div>
                 </button>
               ))}
             </div>

@@ -70,8 +70,9 @@ export interface RaycastResult {
 export type EngineEvent =
   | { type: 'patch'; deltas: CellDelta[]; label: string; clearBeforeApply?: boolean }
   | { type: 'stats'; stats: EngineStats }
-  | { type: 'chrono'; entries: ChronoEntry[] }
-  | { type: 'layers'; layers: LayerMeta[] }
+  | { type: 'chrono'; entries: ChronoEntry[]; futureEntries: ChronoEntry[] }
+  | { type: 'layers'; layers: LayerMeta[]; activeLayer: number }
+  | { type: 'contract'; contract: Contract | null }
   | { type: 'ready' }
   | { type: 'error'; message: string };
 
@@ -106,8 +107,10 @@ export interface IVoxelEngine {
   // ---- Sync reads (cached on main thread; safe to call every frame) ----
   getStats(): EngineStats;
   getChronoEntries(): ChronoEntry[];
+  getChronoFuture(): ChronoEntry[];
   getLayers(): LayerMeta[];
   getActiveLayer(): number;
+  getBlock(x: number, y: number, z: number): BlockId | undefined;
 
   // ---- Async I/O ----
   serialize(): Promise<ArrayBuffer>;
@@ -124,7 +127,7 @@ export interface IVoxelEngine {
   dispose(): void;
   on<T extends EngineEventType>(event: T, handler: EngineEventHandler<T>): () => void;
 
-  // ---- Contract pass-through (so UI doesn't have to mutate engine state directly) ----
+  // ---- Contract ----
   getContract(): Contract | null;
   setContract(c: Contract | null): void;
 }

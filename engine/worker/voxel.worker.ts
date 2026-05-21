@@ -56,6 +56,14 @@ let historyLimit = ENGINE_CHRONO_LIMIT;
 let statsTickMs = 200;
 let statsTimer: ReturnType<typeof setInterval> | null = null;
 
+// Phase 4 — raycast wiring. `raycastPort` is the MessagePort half-given to us
+// at INIT; we use it to push (cellIdx, blockIndex) occupancy deltas. The
+// version counter is monotonic so the raycast worker can drop stale messages.
+let raycastPort: MessagePort | null = null;
+let occupancyVersion = 0;
+// Per-mutation accumulator: pairs of (cellIdx, blockIndex). Reset after flush.
+let pendingOccupancy: Array<[number, number]> = [];
+
 // Incremental stats counters — kept in sync on every cell write. Stats
 // emission is O(1) regardless of world size.
 let cellCount = 0;
@@ -121,7 +129,35 @@ function setCellAt(x: number, y: number, z: number, value: number): number {
     sumAnomaly += blockTable[nextBlock]?.anomaly ?? 0;
   }
 
+  // Phase 4 — accumulate (cellIdx, blockIndex) for the raycast worker. The
+  // mutation handler flushes once per call so a single brush stroke produces
+  // one transferable buffer.
+  if (raycastPort && prevBlock !== nextBlock) {
+    pendingOccupancy.push([cellLinearIdx(x, y, z), nextBlock]);
+  }
+
   return prev;
+}
+
+/**
+ * Drain `pendingOccupancy` and post one OCCUPANCY_DELTA to the raycast worker.
+ * Buffer is transferred (zero-copy); subsequent flushes allocate fresh.
+ */
+function flushOccupancy(): void {
+  if (!raycastPort || pendingOccupancy.length === 0) return;
+  const buf = new ArrayBuffer(pendingOccupancy.length * 2 * 4);
+  const view = new Uint32Array(buf);
+  for (let i = 0; i < pendingOccupancy.length; i++) {
+    const [idx, blk] = pendingOccupancy[i];
+    view[i * 2] = idx;
+    view[i * 2 + 1] = blk;
+  }
+  pendingOccupancy = [];
+  occupancyVersion++;
+  raycastPort.postMessage(
+    { type: 'OCCUPANCY_DELTA', delta: { version: occupancyVersion, buffer: buf } },
+    [buf],
+  );
 }
 
 function computeStats(): EngineStats {
@@ -197,7 +233,16 @@ function emitLayers(): void {
 }
 
 function emitChrono(): void {
-  send({ type: 'CHRONO', entries: chronoEntriesView() });
+  send({
+    type: 'CHRONO',
+    entries: chronoEntriesView(),
+    futureEntries: future.map((e) => ({
+      id: e.id,
+      label: e.label,
+      timestamp: e.timestamp,
+      opCount: e.ops.length,
+    })),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -246,6 +291,7 @@ function handleApplyOps(ops: WireOp[], label: string, requestId?: number): void 
   future = [];
 
   send({ type: 'PATCH', deltas, label, requestId });
+  flushOccupancy();
   emitChrono();
   emitStats();
 }
@@ -283,6 +329,7 @@ function handleUndo(): void {
   const deltas = applyWorkerPatchOps(entry, 'inverse');
   future.push(entry);
   send({ type: 'PATCH', deltas, label: `Undo: ${entry.label}` });
+  flushOccupancy();
   emitChrono();
   emitStats();
 }
@@ -293,6 +340,7 @@ function handleRedo(): void {
   const deltas = applyWorkerPatchOps(entry, 'forward');
   chronoLog.push(entry);
   send({ type: 'PATCH', deltas, label: `Redo: ${entry.label}` });
+  flushOccupancy();
   emitChrono();
   emitStats();
 }
@@ -357,6 +405,7 @@ function handleClearAll(): void {
   future = [];
 
   send({ type: 'PATCH', deltas, label: 'Purge Vault' });
+  flushOccupancy();
   emitChrono();
   emitStats();
 }
@@ -441,14 +490,28 @@ function handleInit(msg: Extract<MainToVoxelMsg, { type: 'INIT' }>): void {
   sumStability = 0;
   sumAnomaly = 0;
 
+  // Phase 4 — adopt the raycast MessagePort if the engine handed one over.
+  // Re-INIT (loadSave path) closes the previous port so the new channel owns
+  // the conversation. Version resets so the snapshot below is the freshest.
+  if (msg.raycastPort) {
+    if (raycastPort) raycastPort.close();
+    raycastPort = msg.raycastPort;
+  }
+  occupancyVersion = 0;
+  pendingOccupancy = [];
+
   // Seed cells from V1 voxelStore snapshot. These are written without
   // pushing a chrono entry — they represent the pre-existing world state.
+  // setCellAt will collect occupancy pairs into pendingOccupancy as it goes.
   if (msg.seedCells && msg.seedCells.length > 0) {
     for (const op of msg.seedCells) {
       const value = packCell(op.blockIndex, op.layer);
       setCellAt(op.x, op.y, op.z, value);
     }
   }
+  // Flush the seed snapshot before announcing READY so the raycast worker
+  // is queried-against an initialized occupancy buffer.
+  flushOccupancy();
 
   // Start (or restart) stats ticker.
   if (statsTimer !== null) clearInterval(statsTimer);
@@ -526,6 +589,11 @@ self.onmessage = (ev: MessageEvent<MainToVoxelMsg>) => {
           clearInterval(statsTimer);
           statsTimer = null;
         }
+        if (raycastPort) {
+          raycastPort.close();
+          raycastPort = null;
+        }
+        pendingOccupancy = [];
         chunks.clear();
         chronoLog = [];
         future = [];

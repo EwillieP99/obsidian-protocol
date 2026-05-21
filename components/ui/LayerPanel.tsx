@@ -3,52 +3,26 @@
 import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import { useMemo } from 'react';
 import { useUIStore } from '@/stores/uiStore';
-import { useVoxelStore } from '@/stores/voxelStore';
 import { Eye, EyeOff, Lock, Unlock, Headphones, GripVertical } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { WORLD_HEIGHT } from '@/lib/constants';
-import type { VoxelLayer } from '@/types';
+import { getEngine, useEngineLayers, useLayerCounts } from '@/hooks/useEngine';
+import type { LayerMeta } from '@/types/engine';
 
 export function LayerPanel() {
   const open = useUIStore((s) => s.panels.layers);
   const togglePanel = useUIStore((s) => s.togglePanel);
-  // IMPORTANT: select the layers array (referentially stable per layerRevision),
-  // then sort in a useMemo. Returning `s.orderedLayers()` directly from a Zustand
-  // selector returns a fresh array every render and triggers the
-  // "getSnapshot should be cached" infinite-loop guard in React 18.
-  const layers = useVoxelStore((s) => s.layers);
-  const layerRevision = useVoxelStore((s) => s.layerRevision);
-  const ordered = useMemo<VoxelLayer[]>(
+  const { layers, activeLayer } = useEngineLayers();
+  const ordered = useMemo<LayerMeta[]>(
     () => [...layers].sort((a, b) => (a.order ?? a.id) - (b.order ?? b.id)),
-    // layerRevision bumps on every layer mutation, so re-derive on each.
-    [layers, layerRevision],
+    [layers],
   );
-  const cells = useVoxelStore((s) => s.cells);
-  const revision = useVoxelStore((s) => s.revision);
-  const activeLayer = useVoxelStore((s) => s.activeLayer);
-  const setActiveLayer = useVoxelStore((s) => s.setActiveLayer);
-  const toggleVis = useVoxelStore((s) => s.toggleLayerVisibility);
-  const toggleLock = useVoxelStore((s) => s.toggleLayerLock);
-  const toggleSolo = useVoxelStore((s) => s.toggleLayerSolo);
-  const setLayerOpacity = useVoxelStore((s) => s.setLayerOpacity);
-  const moveLayer = useVoxelStore((s) => s.moveLayer);
+  const counts = useLayerCounts();
 
-  // Per-layer block counts
-  const counts = new Array(WORLD_HEIGHT).fill(0);
-  for (const k of cells.keys()) {
-    const y = parseInt(k.split(',')[1], 10);
-    if (y >= 0 && y < WORLD_HEIGHT) counts[y]++;
-  }
-
-  // Reorder.Group works on the array order. We render in the panel order
-  // (top-of-vault first, since that maps to the spire crown). Reordering
-  // updates display-only `order` field; the y coordinate is fixed.
-  const handleReorder = (newOrder: VoxelLayer[]) => {
-    // Identify which item moved by comparing against ordered.
+  const handleReorder = (newOrder: LayerMeta[]) => {
     for (let i = 0; i < newOrder.length; i++) {
       if (newOrder[i].id !== ordered[i]?.id) {
         const fromIdx = ordered.findIndex((l) => l.id === newOrder[i].id);
-        if (fromIdx !== -1) moveLayer(fromIdx, i);
+        if (fromIdx !== -1) getEngine().moveLayer(fromIdx, i);
         return;
       }
     }
@@ -65,7 +39,6 @@ export function LayerPanel() {
           exit={{ x: 260, opacity: 0 }}
           transition={{ type: 'spring', stiffness: 240, damping: 24 }}
           className="absolute top-20 right-4 z-30 panel-magenta w-72 corner-bracket"
-          key={`layer-panel-${layerRevision}-${revision}`}
         >
           <header className="flex items-center justify-between px-3 py-2 border-b border-magenta-neon/25">
             <span className="terminal text-xs neon-text-magenta">// VAULT LAYERS</span>
@@ -98,7 +71,7 @@ export function LayerPanel() {
                   )}
                 >
                   <div
-                    onClick={() => setActiveLayer(l.id)}
+                    onClick={() => getEngine().setActiveLayer(l.id)}
                     className={cn(
                       'flex items-center gap-1.5 px-2 py-1.5',
                       isActive ? 'bg-magenta-neon/12' : 'hover:bg-magenta-neon/5',
@@ -113,10 +86,10 @@ export function LayerPanel() {
                       {l.name}
                     </span>
                     <span className="terminal text-[10px] text-magenta-glow/50 w-9 text-right">
-                      {counts[l.id]}
+                      {counts.get(l.id) ?? 0}
                     </span>
                     <button
-                      onClick={(e) => { e.stopPropagation(); toggleSolo(l.id); }}
+                      onClick={(e) => { e.stopPropagation(); getEngine().setLayerSolo(l.id, !l.solo); }}
                       className={cn(
                         'p-1 hover:text-signal-amber',
                         l.solo ? 'text-signal-amber' : 'text-magenta-glow/40',
@@ -126,21 +99,20 @@ export function LayerPanel() {
                       <Headphones size={12} />
                     </button>
                     <button
-                      onClick={(e) => { e.stopPropagation(); toggleLock(l.id); }}
+                      onClick={(e) => { e.stopPropagation(); getEngine().setLayerLock(l.id, !l.locked); }}
                       className={cn('p-1 hover:text-magenta-neon', l.locked ? 'text-signal-red' : 'text-magenta-glow/50')}
                       title="Lock layer"
                     >
                       {l.locked ? <Lock size={12} /> : <Unlock size={12} />}
                     </button>
                     <button
-                      onClick={(e) => { e.stopPropagation(); toggleVis(l.id); }}
+                      onClick={(e) => { e.stopPropagation(); getEngine().setLayerVisibility(l.id, !l.visible); }}
                       className={cn('p-1 hover:text-magenta-neon', l.visible ? 'text-magenta-glow' : 'text-magenta-glow/30')}
                       title="Toggle visibility"
                     >
                       {l.visible ? <Eye size={12} /> : <EyeOff size={12} />}
                     </button>
                   </div>
-                  {/* Per-layer opacity slider */}
                   {isActive && (
                     <div
                       className="px-3 pb-2 flex items-center gap-2"
@@ -153,7 +125,7 @@ export function LayerPanel() {
                         max={1}
                         step={0.05}
                         value={l.opacity ?? 1}
-                        onChange={(e) => setLayerOpacity(l.id, parseFloat(e.target.value))}
+                        onChange={(e) => getEngine().setLayerOpacity(l.id, parseFloat(e.target.value))}
                         className="flex-1 h-1 accent-magenta-neon"
                       />
                       <span className="terminal text-[9px] neon-text-magenta w-6 text-right">

@@ -3,7 +3,7 @@
 import { useFrame } from '@react-three/fiber';
 import { useEffect, useRef } from 'react';
 import { useUIStore } from '@/stores/uiStore';
-import { useVoxelStore } from '@/stores/voxelStore';
+import { getEngine } from '@/hooks/useEngine';
 
 /**
  * Samples FPS every ~500ms, updates the UI store, and feeds an auto-degrade
@@ -48,7 +48,7 @@ export function FpsTracker() {
         highSamples.current = 0;
         return;
       }
-      const hasManyVoxels = useVoxelStore.getState().cells.size > 800;
+      const hasManyVoxels = getEngine().getStats().cellCount > 800;
       // Only auto-degrade when there's enough scene to justify it.
       if (!hasManyVoxels) return;
 

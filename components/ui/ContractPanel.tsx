@@ -2,7 +2,7 @@
 
 import { motion, AnimatePresence } from 'framer-motion';
 import { useUIStore } from '@/stores/uiStore';
-import { useVoxelStore } from '@/stores/voxelStore';
+import { getEngine, useEngineContract } from '@/hooks/useEngine';
 import { generateContract, applyContract } from '@/lib/contracts';
 import { toast } from 'sonner';
 
@@ -16,12 +16,11 @@ const HAZARD_COLOR: Record<'low' | 'medium' | 'high' | 'critical', string> = {
 export function ContractPanel() {
   const open = useUIStore((s) => s.panels.contract);
   const togglePanel = useUIStore((s) => s.togglePanel);
-  const contract = useVoxelStore((s) => s.contract);
-  const setContract = useVoxelStore((s) => s.setContract);
+  const contract = useEngineContract();
 
   const handleNew = () => {
     const c = generateContract();
-    setContract(c);
+    getEngine().setContract(c);
     applyContract(c);
     toast.success('CONTRACT ASSIGNED', { description: `${c.codename} — ${c.client}` });
   };
@@ -81,10 +80,7 @@ export function ContractPanel() {
 }
 
 function Field({
-  label,
-  value,
-  mono,
-  colorOverride,
+  label, value, mono, colorOverride,
 }: { label: string; value: string; mono?: boolean; colorOverride?: string }) {
   return (
     <div>

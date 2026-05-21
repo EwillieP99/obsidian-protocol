@@ -1,8 +1,8 @@
 'use client';
 
 import { useUIStore } from '@/stores/uiStore';
-import { useVoxelStore } from '@/stores/voxelStore';
 import { useEffect, useState } from 'react';
+import { useEngineStats } from '@/hooks/useEngine';
 
 export function StatusBar() {
   const fps = useUIStore((s) => s.fps);
@@ -12,8 +12,7 @@ export function StatusBar() {
   const quality = useUIStore((s) => s.scene.quality);
   const hover = useUIStore((s) => s.hoverCell);
   const renderer = useUIStore((s) => s.rendererMode);
-  const blockCount = useVoxelStore((s) => s.cells.size);
-  const integrity = useVoxelStore((s) => s.computeIntegrity());
+  const { cellCount, integrity } = useEngineStats();
 
   const [t, setT] = useState(() => new Date());
   useEffect(() => {
@@ -25,7 +24,7 @@ export function StatusBar() {
   const integrityColor =
     integrity > 0.75 ? 'text-signal-green' :
     integrity > 0.4 ? 'text-signal-amber' : 'text-signal-red';
-  const showMemory = blockCount > 3000 && memMB > 0;
+  const showMemory = cellCount > 3000 && memMB > 0;
 
   return (
     <div className="absolute bottom-0 left-0 right-0 z-20 panel border-t-cyan-neon/30 px-3 py-1 flex items-center gap-4 terminal text-[10px] text-cyan-glow/80 status-stream">
@@ -70,7 +69,7 @@ export function StatusBar() {
           <Sep />
         </>
       )}
-      <span>BLOCKS · <span className="neon-text-cyan">{blockCount.toString().padStart(4, '0')}</span></span>
+      <span>BLOCKS · <span className="neon-text-cyan">{cellCount.toString().padStart(4, '0')}</span></span>
       <Sep />
       <span>
         CURSOR · <span className="neon-text-cyan">
