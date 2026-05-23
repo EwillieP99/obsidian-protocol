@@ -5,6 +5,9 @@ export type BlockId =
   | 'chrome'
   | 'neon-cyan'
   | 'neon-magenta'
+  | 'neon-amber'
+  | 'neon-lime'
+  | 'neon-violet'
   | 'toxic-core'
   | 'data-stream'
   | 'holo-billboard'
@@ -12,7 +15,8 @@ export type BlockId =
   | 'corp-glass'
   | 'circuit'
   | 'power-line'
-  | 'neural-node';
+  | 'neural-node'
+  | 'carbon';
 
 export type BlockCategory = 'structure' | 'neon' | 'energy' | 'data' | 'anomaly';
 
@@ -56,12 +60,14 @@ export interface VoxelMap {
   cells: Record<string, BlockId>;
 }
 
-export type BrushShape = 'cube' | 'sphere' | 'plane';
-export type BrushMode = 'paint' | 'erase' | 'fill' | 'replace' | 'eyedropper';
+export type BrushShape = 'rectangle' | 'circle';
+export type BrushStroke = 'freehand' | 'line';
+export type BrushMode = 'paint' | 'erase' | 'fill' | 'replace' | 'eyedropper' | 'select';
 
 export interface Brush {
   size: number; // radius in cells (0 = single block)
   shape: BrushShape;
+  stroke: BrushStroke;
   mode: BrushMode;
   /** 0–1: chance to skip a cell, makes brushes feel organic. */
   randomness: number;

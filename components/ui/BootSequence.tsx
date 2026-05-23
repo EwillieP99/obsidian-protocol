@@ -10,6 +10,8 @@ const BOOT_LINES = [
   '> Establishing neural link……………… [ OK ]',
   '> Probing renderer capability ……… [ WebGL2 / GLSL 3.00 ]',
   '> Loading vault substrate (12 layers) [ OK ]',
+  '> Studio mode ready — Artifact Library on key A',
+  '> Select mode X · Copy/Paste Ctrl+C/V · Settings presets available',
   '> Authenticating Architect credentials',
   '   user :: NEXUS-ARCHITECT-7791',
   '   clearance :: OMEGA-BLACK',
@@ -17,7 +19,6 @@ const BOOT_LINES = [
   '> Calibrating bloom envelope ............... 1.10',
   '> Engaging chromatic aberration .......... 0.0015',
   '> Streaming ambient drone telemetry ……… [ OK ]',
-  '> Loading Corporate Contract feed …… 1 PENDING',
   '',
   '> ALL SYSTEMS NOMINAL.',
   '> Welcome back, Architect.',
@@ -29,19 +30,19 @@ export function BootSequence() {
   const [visible, setVisible] = useState<number>(0);
   const [done, setDone] = useState(false);
   const [animDone, setAnimDone] = useState(false);
-  // Guard against double-firing setBooted across the two gating effects.
   const bootedFired = useRef(false);
 
-  // Phase 1: type out the boot lines, then mark animation complete. We hold
-  // back setBooted until BOTH the cinematic finished AND the engine is ready,
-  // so future-phase worker spin-up never races the HUD reveal.
+  const finishBoot = () => {
+    setDone(true);
+    setAnimDone(true);
+  };
+
   useEffect(() => {
     const id = setInterval(() => {
       setVisible((v) => {
         if (v >= BOOT_LINES.length) {
           clearInterval(id);
-          setTimeout(() => setDone(true), 320);
-          setTimeout(() => setAnimDone(true), 900);
+          setTimeout(() => finishBoot(), 320);
           return v;
         }
         return v + 1;
@@ -96,8 +97,14 @@ export function BootSequence() {
                 {visible < BOOT_LINES.length ? '_' : ''}
               </div>
             </div>
+            <button
+              type="button"
+              className="absolute bottom-4 right-4 terminal text-xs text-cyan-glow/60 hover:text-cyan-neon transition-colors"
+              onClick={finishBoot}
+            >
+              Skip intro →
+            </button>
           </div>
-          {/* Subtle vignette */}
           <div className="pointer-events-none absolute inset-0"
                style={{ background: 'radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.85) 100%)' }} />
         </motion.div>

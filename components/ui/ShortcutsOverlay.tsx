@@ -18,7 +18,9 @@ const GROUPS: Array<{ title: string; rows: Shortcut[] }> = [
       { combo: 'F', action: 'Fill mode (empty cells only)' },
       { combo: 'R', action: 'Rewrite — replace matching block type' },
       { combo: 'I', action: 'Sample (eyedropper)' },
+      { combo: 'X', action: 'Select region (click two corners)' },
       { combo: '[ / ]', action: 'Decrease / increase brush size' },
+      { combo: 'Shift + drag', action: 'Freehand: lock stroke to dominant axis' },
     ],
   },
   {
@@ -32,6 +34,7 @@ const GROUPS: Array<{ title: string; rows: Shortcut[] }> = [
   {
     title: 'PANELS',
     rows: [
+      { combo: 'A', action: 'Toggle Artifact Library' },
       { combo: 'L', action: 'Toggle layers panel' },
       { combo: 'P', action: 'Toggle block matrix' },
       { combo: 'H', action: 'Toggle chrono log (history)' },
@@ -39,9 +42,19 @@ const GROUPS: Array<{ title: string; rows: Shortcut[] }> = [
     ],
   },
   {
+    title: 'ARTIFACTS',
+    rows: [
+      { combo: 'Esc', action: 'Cancel stamp mode / clear selection' },
+      { combo: 'R (stamp mode)', action: 'Rotate stamp 90°' },
+      { combo: 'M (stamp mode)', action: 'Mirror stamp on X axis' },
+    ],
+  },
+  {
     title: 'WORLD',
     rows: [
       { combo: 'N', action: 'Generate new corporate contract' },
+      { combo: 'Ctrl/⌘ + C', action: 'Copy selected region to clipboard' },
+      { combo: 'Ctrl/⌘ + V', action: 'Paste clipboard at cursor' },
       { combo: 'Ctrl/⌘ + Z', action: 'Undo' },
       { combo: 'Ctrl/⌘ + Shift+Z', action: 'Redo (also Ctrl/⌘+Y)' },
       { combo: 'Ctrl/⌘ + S', action: 'Save vault to local cache' },
@@ -51,8 +64,8 @@ const GROUPS: Array<{ title: string; rows: Shortcut[] }> = [
   {
     title: 'POINTER',
     rows: [
-      { combo: 'Left-click drag', action: 'Paint with current brush' },
-      { combo: 'Right-click drag', action: 'Quick erase' },
+      { combo: 'Left-click drag', action: 'Paint with current brush (Freehand or Line stroke)' },
+      { combo: 'Right-click drag', action: 'Orbit camera (look around)' },
       { combo: 'Mouse wheel', action: 'Zoom (orbit camera)' },
     ],
   },

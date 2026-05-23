@@ -55,6 +55,12 @@ import type { LayerMeta } from '@/types/engine';
 import type { ChunkExport } from '@/engine/bridge/WorkerProtocol';
 
 export const OBS2_VERSION = 1;
+/** Maximum decoded save size (50 MB). */
+export const OBS2_MAX_BUFFER_BYTES = 50 * 1024 * 1024;
+export const OBS2_MAX_CHUNK_COUNT = 100_000;
+export const OBS2_MAX_LAYER_COUNT = 256;
+export const OBS2_MAX_STRING_BYTES = 256 * 1024;
+export const OBS2_MAX_RUN_COUNT = CHUNK_VOLUME;
 /** ASCII "OBS2" → 0x4F 0x42 0x53 0x32. */
 const MAGIC = [0x4f, 0x42, 0x53, 0x32] as const;
 const HEADER_BYTES = 41;
@@ -203,6 +209,9 @@ export function encodeOBS2(input: EncodeInput): ArrayBuffer {
 
 export function decodeOBS2(buffer: ArrayBuffer): DecodeOutput {
   if (!isOBS2(buffer)) throw new Error('decodeOBS2: bad magic (not an OBS2 buffer)');
+  if (buffer.byteLength > OBS2_MAX_BUFFER_BYTES) {
+    throw new Error(`decodeOBS2: buffer too large (${buffer.byteLength} bytes)`);
+  }
   const view = new DataView(buffer);
   let off = 4; // past magic
 
@@ -213,6 +222,8 @@ export function decodeOBS2(buffer: ArrayBuffer): DecodeOutput {
   const f64 = () => { const v = view.getFloat64(off, true); off += 8; return v; };
   const dec = new TextDecoder();
   const str = (len: number) => {
+    if (len > OBS2_MAX_STRING_BYTES) throw new Error(`decodeOBS2: string too long (${len} bytes)`);
+    if (off + len > buffer.byteLength) throw new Error('decodeOBS2: truncated string');
     if (len === 0) return '';
     const s = dec.decode(new Uint8Array(buffer, off, len));
     off += len;
@@ -226,6 +237,12 @@ export function decodeOBS2(buffer: ArrayBuffer): DecodeOutput {
   u8r(); // chunkSize — assumed CHUNK_SIZE
   const chunkCount = u32();
   const layerCount = u16();
+  if (chunkCount > OBS2_MAX_CHUNK_COUNT) {
+    throw new Error(`decodeOBS2: chunkCount ${chunkCount} exceeds limit`);
+  }
+  if (layerCount > OBS2_MAX_LAYER_COUNT) {
+    throw new Error(`decodeOBS2: layerCount ${layerCount} exceeds limit`);
+  }
   const cellCount = u32();
   const createdAt = f64();
   const updatedAt = f64();
@@ -263,6 +280,9 @@ export function decodeOBS2(buffer: ArrayBuffer): DecodeOutput {
     const cy = i16();
     const cz = i16();
     const runCount = u32();
+    if (runCount > OBS2_MAX_RUN_COUNT) {
+      throw new Error(`decodeOBS2: runCount ${runCount} exceeds limit`);
+    }
     const cells = new Uint16Array(CHUNK_VOLUME);
     let pos = 0;
     for (let r = 0; r < runCount; r++) {

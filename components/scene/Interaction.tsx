@@ -1,14 +1,58 @@
 'use client';
 
 import * as THREE from 'three';
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { ThreeEvent } from '@react-three/fiber';
 import { useUIStore } from '@/stores/uiStore';
 import { useEffectsStore } from '@/stores/effectsStore';
-import { getEngine } from '@/hooks/useEngine';
-import { brushCells, operationsForBrush } from '@/lib/brush';
+import { getEngine, useEngineLayers } from '@/hooks/useEngine';
+import { brushCells, cellsAlongStroke, operationsForBrush } from '@/lib/brush';
 import { WORLD_SIZE, WORLD_HEIGHT, FLOOR_Y, HALF } from '@/lib/constants';
+import type { BrushMode } from '@/types';
 import { toast } from 'sonner';
+import { transformCells } from '@/lib/artifacts/transform';
+
+function isRightPointer(e: ThreeEvent<PointerEvent>) {
+  return e.button === 2 || (e.buttons & 2) !== 0;
+}
+
+function isInteractionBlocked(): boolean {
+  return useUIStore.getState().loading !== null;
+}
+
+/** Snap freehand steps to the dominant axis from a reference cell. */
+function constrainToAxis(
+  from: [number, number, number],
+  to: [number, number, number],
+): [number, number, number] {
+  const dx = Math.abs(to[0] - from[0]);
+  const dy = Math.abs(to[1] - from[1]);
+  const dz = Math.abs(to[2] - from[2]);
+  if (dx >= dy && dx >= dz) return [to[0], from[1], from[2]];
+  if (dy >= dx && dy >= dz) return [from[0], to[1], from[2]];
+  return [from[0], from[1], to[2]];
+}
+
+/**
+ * Snap vacant brush targets to the active layer stratum (world Y = layer id).
+ * Preserve picked Y when editing an existing voxel (erase / replace / sample).
+ */
+function resolveBrushCell(
+  raw: [number, number, number],
+  mode: BrushMode,
+): [number, number, number] {
+  const [x, y, z] = raw;
+  const activeLayer = getEngine().getActiveLayer();
+
+  if (
+    (mode === 'erase' || mode === 'replace' || mode === 'eyedropper') &&
+    getEngine().getBlock(x, y, z)
+  ) {
+    return [x, y, z];
+  }
+
+  return [x, activeLayer, z];
+}
 
 /**
  * Wraps voxels + floor in a group whose pointer handlers compute the targeted cell.
@@ -19,12 +63,28 @@ import { toast } from 'sonner';
  */
 export function Interaction({ children }: { children: React.ReactNode }) {
   const isDown = useRef(false);
-  const lastCell = useRef<string | null>(null);
-  const dragMode = useRef<'paint' | 'erase' | null>(null);
+  const lastCell = useRef<[number, number, number] | null>(null);
+  const strokeStart = useRef<[number, number, number] | null>(null);
+  const freehandCells = useRef<Array<[number, number, number]>>([]);
+
+  const { activeLayer, layers } = useEngineLayers();
+  const layersPanelOpen = useUIStore((s) => s.panels.layers);
+  const soloLayerId = layers.find((l) => l.solo)?.id;
 
   const planeGeom = useMemo(() => new THREE.PlaneGeometry(WORLD_SIZE * 4, WORLD_SIZE * 4), []);
   const planeMat = useMemo(
     () => new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }),
+    [],
+  );
+  const guideMat = useMemo(
+    () =>
+      new THREE.MeshBasicMaterial({
+        color: 0xff00aa,
+        transparent: true,
+        opacity: 0.08,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
     [],
   );
 
@@ -43,68 +103,110 @@ export function Interaction({ children }: { children: React.ReactNode }) {
         normal: [normal.x, normal.y, normal.z] as [number, number, number],
       };
     }
-    // Floor plane
-    const cell: [number, number, number] = [Math.round(point.x), 0, Math.round(point.z)];
+
+    const mesh = obj as THREE.Mesh;
+    const stratumY = Math.round(mesh.position.y - FLOOR_Y);
+    const cell: [number, number, number] = [Math.round(point.x), stratumY, Math.round(point.z)];
     return { insideCell: cell, outsideCell: cell, normal: [0, 1, 0] as [number, number, number] };
   }, []);
 
   const inBounds = (x: number, y: number, z: number) =>
     x >= -HALF && x < HALF && z >= -HALF && z < HALF && y >= 0 && y < WORLD_HEIGHT;
 
-  const apply = useCallback((cell: [number, number, number]) => {
-    const [cx, cy, cz] = cell;
-    const { brush, activeBlock } = useUIStore.getState();
+  const pickRawCell = useCallback(
+    (brushMode: BrushMode, outsideCell: [number, number, number], insideCell: [number, number, number]) => {
+      const useInside =
+        brushMode === 'erase' ||
+        brushMode === 'replace' ||
+        brushMode === 'eyedropper';
+      return useInside ? insideCell : outsideCell;
+    },
+    [],
+  );
 
-    if (brush.mode === 'eyedropper') {
-      const cur = getEngine().getBlock(cx, cy, cz);
-      if (cur) {
-        useUIStore.getState().setActiveBlock(cur);
-        toast.success(`Sampled ${cur}`, { description: 'Block injected into active palette slot.' });
+  const applyCells = useCallback(
+    (cells: Array<[number, number, number]>, label?: string) => {
+      if (cells.length === 0) return;
+
+      const { brush, activeBlock } = useUIStore.getState();
+      const inBoundsFiltered = cells.filter(([x, y, z]) => inBounds(x, y, z));
+
+      let pickReplaceTarget: import('@/types').BlockId | undefined;
+      if (brush.mode === 'replace') {
+        const [cx, cy, cz] = inBoundsFiltered[0] ?? cells[0];
+        pickReplaceTarget = getEngine().getBlock(cx, cy, cz);
+        if (!pickReplaceTarget) return;
       }
-      return;
-    }
 
-    const cells = brush.size === 0 ? [[cx, cy, cz] as [number, number, number]] : brushCells(cx, cy, cz, brush);
-    const inBoundsFiltered = cells.filter(([x, y, z]) => inBounds(x, y, z));
-    const effectiveMode =
-      dragMode.current === 'erase' ? 'erase' : brush.mode;
-
-    let pickReplaceTarget: import('@/types').BlockId | undefined;
-    if (effectiveMode === 'replace') {
-      pickReplaceTarget = getEngine().getBlock(cx, cy, cz);
-      if (!pickReplaceTarget) return;
-    }
-
-    const ops = operationsForBrush(
-      inBoundsFiltered,
-      activeBlock,
-      effectiveMode,
-      (x, y, z) => getEngine().getBlock(x, y, z),
-      pickReplaceTarget,
-    );
-    if (ops.length) {
-      const label =
-        effectiveMode === 'erase' ? 'Purge' :
-        effectiveMode === 'fill' ? 'Fill' :
-        effectiveMode === 'replace' ? 'Replace' :
-        `Place ${activeBlock}`;
-      getEngine().applyOps(
-        ops.map((o) => ({ x: o.x, y: o.y, z: o.z, blockId: o.block, layer: o.y })),
-        label,
+      const ops = operationsForBrush(
+        inBoundsFiltered,
+        activeBlock,
+        brush.mode,
+        (x, y, z) => getEngine().getBlock(x, y, z),
+        pickReplaceTarget,
       );
+      if (ops.length) {
+        const activeLayerId = getEngine().getActiveLayer();
+        const effectiveLabel =
+          label ??
+          (brush.mode === 'erase' ? 'Purge' :
+          brush.mode === 'fill' ? 'Fill' :
+          brush.mode === 'replace' ? 'Replace' :
+          `Place ${activeBlock}`);
+        getEngine().applyOps(
+          ops.map((o) => ({ x: o.x, y: o.y, z: o.z, blockId: o.block, layer: activeLayerId })),
+          effectiveLabel,
+        );
+      }
+    },
+    [],
+  );
+
+  const applyEyedropper = useCallback((cell: [number, number, number]) => {
+    const [cx, cy, cz] = resolveBrushCell(cell, 'eyedropper');
+    const cur = getEngine().getBlock(cx, cy, cz);
+    if (cur) {
+      useUIStore.getState().setActiveBlock(cur);
+      toast.success(`Sampled ${cur}`, { description: 'Block injected into active palette slot.' });
+    }
+  }, []);
+
+  const collectFreehandCell = useCallback((target: [number, number, number]) => {
+    const { brush } = useUIStore.getState();
+    const footprint =
+      brush.size === 0
+        ? [target]
+        : brushCells(target[0], target[1], target[2], brush);
+    const seen = new Set(freehandCells.current.map(([x, y, z]) => `${x},${y},${z}`));
+    for (const cell of footprint) {
+      const k = `${cell[0]},${cell[1]},${cell[2]}`;
+      if (!seen.has(k)) {
+        seen.add(k);
+        freehandCells.current.push(cell);
+      }
     }
   }, []);
 
   const handlePointerMove = useCallback((e: ThreeEvent<PointerEvent>) => {
+    if (isRightPointer(e)) return;
+
     e.stopPropagation();
     const { outsideCell, insideCell, normal } = computeCell(e);
     const { brush } = useUIStore.getState();
-    const useInside =
-      brush.mode === 'erase' ||
-      brush.mode === 'replace' ||
-      brush.mode === 'eyedropper' ||
-      dragMode.current === 'erase';
-    const target = useInside ? insideCell : outsideCell;
+
+    if (brush.mode === 'select') {
+      if (inBounds(...insideCell)) {
+        useUIStore.getState().setHover(insideCell, normal);
+      }
+      return;
+    }
+
+    const raw = pickRawCell(brush.mode, outsideCell, insideCell);
+    let target = resolveBrushCell(raw, brush.mode);
+
+    if (isDown.current && brush.stroke === 'freehand' && lastCell.current && e.shiftKey) {
+      target = constrainToAxis(lastCell.current, target);
+    }
 
     if (!inBounds(...target)) {
       useUIStore.getState().setHover(null, null);
@@ -112,49 +214,127 @@ export function Interaction({ children }: { children: React.ReactNode }) {
     }
     useUIStore.getState().setHover(target, normal);
 
-    if (isDown.current) {
-      const k = `${target[0]},${target[1]},${target[2]}`;
-      if (lastCell.current !== k) {
-        lastCell.current = k;
-        apply(target);
+    if (isDown.current && brush.mode !== 'eyedropper') {
+      if (brush.stroke === 'line') {
+        if (strokeStart.current) {
+          lastCell.current = target;
+          useUIStore.getState().setStrokePreview(strokeStart.current, target);
+        }
+      } else {
+        const k = `${target[0]},${target[1]},${target[2]}`;
+        const last = lastCell.current;
+        const lastKey = last ? `${last[0]},${last[1]},${last[2]}` : null;
+        if (lastKey !== k) {
+          lastCell.current = target;
+          collectFreehandCell(target);
+        }
       }
     }
-  }, [apply, computeCell]);
+  }, [collectFreehandCell, computeCell, pickRawCell]);
 
   const handlePointerDown = useCallback((e: ThreeEvent<PointerEvent>) => {
+    if (isInteractionBlocked()) return;
     if (e.button !== 0 && e.button !== 2) return;
+    if (e.button === 2) return;
+
+    const { stampArtifact, stampTransform } = useUIStore.getState();
+    if (stampArtifact) {
+      e.stopPropagation();
+      const { outsideCell } = computeCell(e);
+      const [ax, ay, az] = resolveBrushCell(outsideCell, 'paint');
+      if (!inBounds(ax, ay, az)) return;
+      const activeLayerId = getEngine().getActiveLayer();
+      const soloLayer = getEngine().getLayers().find((l) => l.solo)?.id;
+      const cells = transformCells(stampArtifact.cells, stampTransform);
+      getEngine().applyOps(
+        cells.map((c) => ({
+          x: ax + c.dx,
+          y: ay + c.dy,
+          z: az + c.dz,
+          blockId: c.blockId,
+          layer: soloLayer !== undefined ? activeLayerId : c.layer,
+        })),
+        `Stamp ${stampArtifact.name}`,
+      );
+      return;
+    }
+
     e.stopPropagation();
-    isDown.current = true;
-    dragMode.current = e.button === 2 ? 'erase' : 'paint';
+
+    const { brush } = useUIStore.getState();
+
+    if (brush.mode === 'select') {
+      const { insideCell } = computeCell(e);
+      if (!inBounds(...insideCell)) return;
+      const ui = useUIStore.getState();
+      if (!ui.selectionStart) {
+        ui.setSelectionStart(insideCell);
+      } else {
+        ui.setSelectionEnd(insideCell);
+      }
+      return;
+    }
 
     const { outsideCell, insideCell } = computeCell(e);
-    const { brush } = useUIStore.getState();
-    const useInside =
-      brush.mode === 'erase' ||
-      brush.mode === 'replace' ||
-      brush.mode === 'eyedropper' ||
-      dragMode.current === 'erase';
-    const target = useInside ? insideCell : outsideCell;
+    const raw = pickRawCell(brush.mode, outsideCell, insideCell);
+    const target = resolveBrushCell(raw, brush.mode);
     if (!inBounds(...target)) return;
-    lastCell.current = `${target[0]},${target[1]},${target[2]}`;
-    apply(target);
-  }, [apply, computeCell]);
 
-  const handlePointerUp = useCallback(() => {
+    if (brush.mode === 'eyedropper') {
+      applyEyedropper(raw);
+      return;
+    }
+
+    isDown.current = true;
+    lastCell.current = target;
+    freehandCells.current = [];
+
+    if (brush.stroke === 'line') {
+      strokeStart.current = target;
+      useUIStore.getState().setStrokePreview(target, target);
+    } else {
+      strokeStart.current = null;
+      useUIStore.getState().clearStrokePreview();
+      collectFreehandCell(target);
+    }
+  }, [applyEyedropper, collectFreehandCell, computeCell, pickRawCell]);
+
+  const finishStroke = useCallback(() => {
+    if (!isDown.current) return;
+
+    const { brush, activeBlock } = useUIStore.getState();
+
+    if (brush.stroke === 'line' && strokeStart.current && brush.mode !== 'eyedropper' && brush.mode !== 'select') {
+      const end = lastCell.current ?? strokeStart.current;
+      const cells = cellsAlongStroke(strokeStart.current, end, brush, activeBlock);
+      applyCells(cells, 'Line stroke');
+    } else if (brush.stroke === 'freehand' && freehandCells.current.length > 0) {
+      applyCells(freehandCells.current);
+    }
+
     isDown.current = false;
     lastCell.current = null;
-    dragMode.current = null;
-  }, []);
+    strokeStart.current = null;
+    freehandCells.current = [];
+    useUIStore.getState().clearStrokePreview();
+  }, [applyCells]);
+
+  useEffect(() => {
+    const onWindowPointerUp = () => finishStroke();
+    window.addEventListener('pointerup', onWindowPointerUp);
+    return () => window.removeEventListener('pointerup', onWindowPointerUp);
+  }, [finishStroke]);
+
+  const handlePointerUp = useCallback((e: ThreeEvent<PointerEvent>) => {
+    if (e.button === 2) return;
+    finishStroke();
+  }, [finishStroke]);
 
   const handlePointerLeave = useCallback(() => {
     useUIStore.getState().setHover(null, null);
-    isDown.current = false;
-    lastCell.current = null;
-    dragMode.current = null;
   }, []);
 
   const handleDoubleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
-    // Only react to double-clicks on actual blocks, not the floor.
     if (!(e.object instanceof THREE.InstancedMesh) || !e.face) return;
     e.stopPropagation();
     const point = e.point;
@@ -163,6 +343,9 @@ export function Interaction({ children }: { children: React.ReactNode }) {
     if (!inBounds(...target)) return;
     useEffectsStore.getState().setFocus(target);
   }, []);
+
+  const showLayerGuide = layersPanelOpen || soloLayerId !== undefined || activeLayer > 0;
+  const layerPlaneY = activeLayer + FLOOR_Y;
 
   return (
     <group
@@ -173,7 +356,6 @@ export function Interaction({ children }: { children: React.ReactNode }) {
       onDoubleClick={handleDoubleClick}
       onContextMenu={(e) => e.nativeEvent.preventDefault()}
     >
-      {/* Catch-all floor for empty cells. Invisible but raycasts. */}
       <mesh
         rotation-x={-Math.PI / 2}
         position={[0, FLOOR_Y, 0]}
@@ -181,6 +363,23 @@ export function Interaction({ children }: { children: React.ReactNode }) {
         material={planeMat}
       />
       {children}
+      {activeLayer > 0 && (
+        <mesh
+          rotation-x={-Math.PI / 2}
+          position={[0, layerPlaneY, 0]}
+          geometry={planeGeom}
+          material={planeMat}
+        />
+      )}
+      {showLayerGuide && (
+        <mesh
+          rotation-x={-Math.PI / 2}
+          position={[0, layerPlaneY, 0]}
+          geometry={planeGeom}
+          material={guideMat}
+          raycast={() => null}
+        />
+      )}
     </group>
   );
 }

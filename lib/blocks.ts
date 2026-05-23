@@ -29,6 +29,20 @@ export const BLOCK_TYPES: Record<BlockId, BlockType> = {
     metalness: 1,
     roughness: 0.18,
   },
+  carbon: {
+    id: 'carbon',
+    name: 'Carbon',
+    loreName: 'Void Composite',
+    description: 'Matte carbon weave. Secondary structural fill between chrome spines.',
+    category: 'structure',
+    color: '#1a1a22',
+    emissive: '#000000',
+    emissiveIntensity: 0,
+    stability: 0.92,
+    anomaly: 0,
+    metalness: 0.25,
+    roughness: 0.65,
+  },
   'corp-glass': {
     id: 'corp-glass',
     name: 'Corp Glass',
@@ -67,6 +81,48 @@ export const BLOCK_TYPES: Record<BlockId, BlockType> = {
     category: 'neon',
     color: '#ff00aa',
     emissive: '#ff00aa',
+    emissiveIntensity: 2.6,
+    stability: 0.85,
+    anomaly: 0,
+    metalness: 0.1,
+    roughness: 0.4,
+  },
+  'neon-amber': {
+    id: 'neon-amber',
+    name: 'Amber Neon',
+    loreName: 'Solar Sigil',
+    description: 'Warm amber tube. Marks transit hubs and late-night ramen stalls.',
+    category: 'neon',
+    color: '#ffaa00',
+    emissive: '#ffaa00',
+    emissiveIntensity: 2.6,
+    stability: 0.85,
+    anomaly: 0,
+    metalness: 0.1,
+    roughness: 0.4,
+  },
+  'neon-lime': {
+    id: 'neon-lime',
+    name: 'Lime Neon',
+    loreName: 'Verdant Sigil',
+    description: 'Acid-lime tube. Cheap signage for black-market clinics.',
+    category: 'neon',
+    color: '#aaff00',
+    emissive: '#aaff00',
+    emissiveIntensity: 2.6,
+    stability: 0.85,
+    anomaly: 0,
+    metalness: 0.1,
+    roughness: 0.4,
+  },
+  'neon-violet': {
+    id: 'neon-violet',
+    name: 'Violet Neon',
+    loreName: 'Ultraviolet Sigil',
+    description: 'Deep violet tube. Flickers outside synth bars and arcology lounges.',
+    category: 'neon',
+    color: '#aa44ff',
+    emissive: '#aa44ff',
     emissiveIntensity: 2.6,
     stability: 0.85,
     anomaly: 0,
@@ -184,9 +240,13 @@ export const BLOCK_TYPES: Record<BlockId, BlockType> = {
 export const BLOCK_ORDER: BlockId[] = [
   'obsidian',
   'chrome',
+  'carbon',
   'corp-glass',
   'neon-cyan',
   'neon-magenta',
+  'neon-amber',
+  'neon-lime',
+  'neon-violet',
   'toxic-core',
   'data-stream',
   'holo-billboard',
@@ -220,6 +280,10 @@ export const BLOCK_INDEX_TABLE: ReadonlyArray<BlockId | null> = [
   'power-line', // 10
   'neural-node', // 11
   'glitch', // 12
+  'neon-amber', // 13
+  'neon-lime', // 14
+  'neon-violet', // 15
+  'carbon', // 16
 ];
 
 const _blockIdToIndex = new Map<BlockId, number>();

@@ -12,6 +12,7 @@ import type { BlockId, Contract } from '@/types';
 import type { ChronoEntry, EngineStats, LayerMeta } from '@/types/engine';
 import type {
   BlockTableEntry,
+  ChunkExport,
   MainToVoxelMsg,
   VoxelToMainMsg,
   WireDelta,
@@ -470,6 +471,41 @@ function handleRenameLayer(id: number, name: string): void {
 }
 
 // ---------------------------------------------------------------------------
+// Serialization (Phase 5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Export every non-empty chunk's raw cell buffer for the compress worker to
+ * encode into OBS2. Each buffer is CLONED via `.slice()` before transfer — the
+ * live `Chunk` keeps using its own Uint16Array, so transferring the original
+ * would detach the worker's view and corrupt the world.
+ */
+function handleSerialize(requestId: number, name: string, thumbnail?: string): void {
+  const exported: ChunkExport[] = [];
+  const transfer: Transferable[] = [];
+  for (const [ck, chunk] of chunks) {
+    if (chunk.count === 0) continue;
+    const [cxs, cys, czs] = ck.split(',');
+    const clone = chunk.data.slice(); // fresh buffer; live chunk untouched
+    exported.push({ cx: +cxs, cy: +cys, cz: +czs, data: clone.buffer });
+    transfer.push(clone.buffer);
+  }
+  send(
+    {
+      type: 'SERIALIZED_RAW',
+      requestId,
+      chunks: exported,
+      layers: [...layers],
+      contract,
+      name,
+      thumbnail,
+      cellCount,
+    },
+    transfer,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
 
@@ -577,12 +613,15 @@ self.onmessage = (ev: MessageEvent<MainToVoxelMsg>) => {
         emitStats();
         break;
       case 'SERIALIZE':
-        // Phase 5: route to compress.worker via MessageChannel. For this slice
-        // we silently no-op so the engine's serialize() path falls back to
-        // V1 JSON in VoxelEngine.
+        handleSerialize(msg.requestId, msg.name, msg.thumbnail);
         break;
       case 'LOADED_CHUNKS':
-        // Phase 5: incoming decoded chunks. No-op for this slice.
+        // Reserved for a future zero-copy load (Phase 5b): install transferred
+        // chunk buffers directly instead of re-seeding via INIT. Today
+        // engine.loadSave() re-seeds through INIT (postVoxelInit), which gives a
+        // fresh raycast MessageChannel and rebuilt counters for free, so the
+        // engine never sends this message.
+        void msg.chunks;
         break;
       case 'DISPOSE':
         if (statsTimer !== null) {

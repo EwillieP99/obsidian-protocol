@@ -15,30 +15,28 @@ production-quality cyberpunk creative tool.
 ## ✦ Features
 
 ### Core
-- **R3F voxel engine** with `InstancedMesh`-per-block-type rendering, tested to
-  thousands of voxels at 60+ FPS on mid-range hardware.
-- **12 cyberpunk block types** across 5 categories (Structure, Neon, Energy,
+- **Studio-first creative tool** — open and build immediately; optional **Immersive Mode** (Settings) enables integrity meter, anomaly alerts, and contract toolbar button
+- **R3F voxel engine** with worker-backed state and `RenderBridge` frame-coalesced GPU writes — tested to thousands of voxels at 60+ FPS on mid-range hardware
+- **16 cyberpunk block types** across 5 categories (Structure, Neon, Energy,
   Data, Anomaly) — including:
   - `Toxic Core` and `Neural Node` with **animated GLSL pulse-core shaders**
   - `Holo Billboard` with scrolling **holographic scanline shader**
   - `Data Stream` with a **liquid bandwidth waterfall shader**
   - `Glitch Zone` with a **chromatic-break / jitter shader**
   - `Circuit Plate` with a **PCB trace flow shader**
-- **Brush system**: Paint, Purge (erase), Fill, Rewrite (replace), Sample (eyedropper).
-  Brush size, shape (cube / sphere / plane), and randomness sliders.
+- **Brush system**: Paint, Purge (erase), Fill, Rewrite (replace), Sample (eyedropper), **Select** (region copy/paste).
+  Brush size (XZ radius on active layer), shape (rectangle / circle), and randomness sliders.
   Live 3D **brush preview** with shape-aware envelope and face-normal indicator.
-- **8–12 layers** with per-layer visibility, lock, solo modes, **drag-to-reorder
-  display**, **per-layer opacity sliders**, and live block counts.
+- **Artifact Library**: prefab stamps, region select, Ctrl+C/V copy/paste, save selections to library (panel **A**).
+- **12 vertical layers** with per-layer visibility, lock, solo modes, **drag-to-reorder
+  display**, **per-layer opacity sliders**, dominant-block swatches, and live block counts.
 - **Undo / redo** with a full chrono-log timeline UI — click any entry to time-travel.
   Affected cells flash on undo / redo for instant visual feedback.
-- **Reactive postprocessing**: bloom intensity scales inversely with neural integrity,
-  glitch effect activates automatically when the vault destabilizes.
+- **Reactive postprocessing**: bloom scales with neural integrity; glitch can be toggled in Settings. Auto anomaly escalation when **Immersive Mode** is on.
 - **Camera presets**: Architect (overview), Street (eye-level), Neural Dive (low aerial),
   plus cinematic auto-rotate and **double-click Focus on Selection** fly-to.
-- **Procedural Corporate Contracts** that generate lore-rich starting structures
-  with hazard-scaled complexity.
-- **Persistence**: IndexedDB autosave (every 20s) + named slots, JSON
-  import/export, and one-click loadable example vaults.
+- **Procedural Corporate Contracts** *(Immersive Mode)* — lore-rich starting structures with hazard-scaled complexity.
+- **Persistence**: IndexedDB autosave (every 20s) + named slots; **OBS2 binary** export/import (`.obs2` primary, `.json` fallback on load), and one-click example vaults.
 - **Cyberpunk UI**: full neon palette, holographic panels, CRT scanline overlay,
   glitching boot sequence, animated "ambient drone" sprites in the background,
   HUD-wide subtle data-stream effect, micro-animated controls.
@@ -97,7 +95,7 @@ This release is a polish + perf pass on top of the original prototype. Highlight
   *(Pinned to 14.x: R3F v8 / `react-reconciler@0.27` is incompatible with Next 15's bundled React internals. Upgrade requires R3F v9.)*
 - **React Three Fiber** + **drei** + **@react-three/postprocessing**
 - **Three.js r170** (WebGL2; WebGPURenderer path stubbed for future)
-- **Zustand** for global voxel + UI + effects state
+- **Zustand** for UI + effects state (`uiStore`, `effectsStore`); voxel state lives in `engine/worker/voxel.worker.ts`
 - **Framer Motion** + **Tailwind CSS** for the HUD
 - **Sonner** for toasts, **Lucide** for icons
 - **idb-keyval** for IndexedDB persistence
@@ -112,7 +110,21 @@ npm install
 npm run dev          # dev server on http://localhost:3000
 npm run build        # production build
 npm run typecheck    # tsc --noEmit
+npm test             # Vitest smoke tests (OBS2 + worker protocol)
 ```
+
+---
+
+## ✦ Deploy
+
+Deploy to [Vercel](https://vercel.com) with the included `vercel.json` (Next.js 14 framework preset):
+
+```bash
+npx vercel          # preview deploy
+npx vercel --prod   # production
+```
+
+The app is fully client-side after build — no server env vars required. Example vaults ship in `public/examples/`.
 
 > **Hardware recommendation:** Any laptop GPU from 2020 onward will hit 60+ FPS
 > at default settings with up to ~3000 voxels. For larger structures, swap the
@@ -132,6 +144,9 @@ Press `?` or `/` in-app for a styled overlay of every binding.
 | `F`                 | Fill mode (empty cells only)                    |
 | `R`                 | Rewrite mode (replace matching block type)      |
 | `I`                 | Sample (eyedropper)                             |
+| `X`                 | Select mode (region copy/paste)                 |
+| `A`                 | Toggle Artifact Library panel                   |
+| `Ctrl/⌘ + C/V`      | Copy / paste selection                          |
 | `[` / `]`           | Decrease / increase brush size                  |
 | `1` / `2` / `3`     | Camera: Architect / Street / Neural Dive        |
 | `C`                 | Toggle cinematic auto-rotate                    |
@@ -145,7 +160,7 @@ Press `?` or `/` in-app for a styled overlay of every binding.
 | `Ctrl/⌘ + Z`        | Undo                                            |
 | `Ctrl/⌘ + Shift+Z`  | Redo (also `Ctrl/⌘ + Y`)                        |
 | `Ctrl/⌘ + S`        | Save vault to local cache                       |
-| **Right-click drag**| Quick erase                                     |
+| **Right-click drag**| Orbit camera (look around)                      |
 
 ---
 
@@ -154,9 +169,7 @@ Press `?` or `/` in-app for a styled overlay of every binding.
 The autosave runs every 20 seconds while you build. Named saves live in
 IndexedDB under the `obsidian-protocol-saves-v1` namespace.
 
-To **share** a vault, click `EXPORT` in the toolbar — you'll get a JSON file
-containing the cells, layers, and active contract. Drop a JSON onto the `IMPORT`
-button or load a colleague's file directly.
+To **share** a vault, click **Export vault** in the toolbar — you'll get an `.obs2` file (or `.json` fallback). Use **Import vault** to load a colleague's file.
 
 To regenerate the demo saves shipped in `public/examples/`:
 
@@ -197,11 +210,8 @@ The example vaults included are:
 
 ## ✦ Performance notes
 
-- All voxels share **one InstancedMesh per block type** (12 meshes total). Up to
-  256 instances pre-allocated; capacity grows by 1.5× when exceeded.
-- Shader-driven blocks (`Toxic Core`, `Holo Billboard`, etc.) share a **single
-  `uTime` uniform** updated once per frame from `<SharedShaderClock>` — no
-  per-material `useFrame` subscription.
+- All voxels share **one InstancedMesh per block type** (16 meshes total), each pre-allocated to **16,384 instances** (`MAX_INSTANCES` in `lib/constants.ts`).
+- Shader-driven blocks share a **single `uTime` uniform** updated once per frame in `components/scene/Voxels.tsx` — no per-material `useFrame` subscription.
 - The cursor preview re-renders only on hover-cell changes and caps the visible
   ghost-cell count at 64 even for huge brushes.
 - Postprocessing pipeline uses `multisampling: 0` and mipmapped bloom blur for
@@ -237,11 +247,12 @@ components/
                      # ShortcutsOverlay, LoadingVeil, HudStream, …
 engine/              # V2 voxel engine (worker-backed canonical state):
   core/              #   VoxelEngine — IVoxelEngine impl, main-thread orchestrator
-  worker/            #   voxel.worker (canonical state), raycast.worker (DDA queries)
+  worker/            #   voxel.worker, raycast.worker, compress.worker (OBS2)
   bridge/            #   RenderBridge (frame-coalesced GPU writes), WorkerProtocol
   chunks/            #   Chunk — 16³ bit-packed uint16 cells
+  persist/           #   obs2.ts — binary save codec
 hooks/               # useKeyboardShortcuts, useEffectBindings, useEngine* reads
-lib/                 # blocks, brush, contracts, persistence, audio, utils, constants
+lib/                 # blocks, brush, contracts, persistence, artifacts, audio, …
 shaders/             # GLSL fragment/vertex strings for shader-driven blocks
 stores/              # Zustand: uiStore, effectsStore (UI/effects only — voxel state
                      # lives in engine/ since Phase 3.5; voxelStore was deleted)

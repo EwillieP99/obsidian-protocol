@@ -2,7 +2,7 @@
 
 import { useUIStore } from '@/stores/uiStore';
 import { useEffect, useState } from 'react';
-import { useEngineStats } from '@/hooks/useEngine';
+import { useEngineStats, useEngineLayers } from '@/hooks/useEngine';
 
 export function StatusBar() {
   const fps = useUIStore((s) => s.fps);
@@ -12,7 +12,14 @@ export function StatusBar() {
   const quality = useUIStore((s) => s.scene.quality);
   const hover = useUIStore((s) => s.hoverCell);
   const renderer = useUIStore((s) => s.rendererMode);
+  const brush = useUIStore((s) => s.brush);
+  const immersiveMode = useUIStore((s) => s.immersiveMode);
+  const lastSavedAt = useUIStore((s) => s.lastSavedAt);
+  const lastSaveError = useUIStore((s) => s.lastSaveError);
+  const engineDegraded = useUIStore((s) => s.engineDegraded);
+  const stampArtifact = useUIStore((s) => s.stampArtifact);
   const { cellCount, integrity } = useEngineStats();
+  const { layers, activeLayer } = useEngineLayers();
 
   const [t, setT] = useState(() => new Date());
   useEffect(() => {
@@ -20,72 +27,75 @@ export function StatusBar() {
     return () => clearInterval(id);
   }, []);
 
-  const fpsColor = fps > 55 ? 'text-signal-green' : fps > 30 ? 'text-signal-amber' : 'text-signal-red';
+  const layerName = layers.find((l) => l.id === activeLayer)?.name ?? `L${activeLayer}`;
+  const fpsColor = fps > 55 ? 'var(--op-green)' : fps > 30 ? 'var(--op-amber)' : 'var(--op-red)';
   const integrityColor =
-    integrity > 0.75 ? 'text-signal-green' :
-    integrity > 0.4 ? 'text-signal-amber' : 'text-signal-red';
+    integrity > 0.75 ? 'var(--op-green)' :
+    integrity > 0.4 ? 'var(--op-amber)' : 'var(--op-red)';
   const showMemory = cellCount > 3000 && memMB > 0;
 
+  const saveLabel = lastSavedAt
+    ? `Saved ${Math.max(0, Math.round((Date.now() - lastSavedAt) / 1000))}s ago`
+    : 'Autosave 20s';
+
   return (
-    <div className="absolute bottom-0 left-0 right-0 z-20 panel border-t-cyan-neon/30 px-3 py-1 flex items-center gap-4 terminal text-[10px] text-cyan-glow/80 status-stream">
-      <span className="flex items-center gap-1.5">
-        <span className="pulse-dot" />
-        <span className="neon-text-cyan">NEXUS::ONLINE</span>
-      </span>
-      <Sep />
-      <span>RENDERER · <span className="neon-text-cyan">{renderer.toUpperCase()}</span></span>
-      <Sep />
-      <span>QUALITY · <span className="neon-text-cyan">{quality.toUpperCase()}</span></span>
-      <Sep />
-      {showFps && (
-        <>
-          <button
-            onClick={() => setScene({ showFps: false })}
-            title="Click to hide FPS readout"
-            className="hover:text-cyan-neon"
-          >
-            FPS · <span className={fpsColor}>{fps.toString().padStart(3, '0')}</span>
+    <div className="op-footer">
+      <div className="op-statusbar">
+        <span className="op-live">{engineDegraded ? 'Engine Degraded' : 'Nexus Online'}</span>
+
+        <span className="opt-hide-sm"><span className="k">Renderer</span><span className="v">{renderer.toUpperCase()}</span></span>
+        <span className="opt-hide-md"><span className="k">Quality</span><span className="v">{quality.toUpperCase()}</span></span>
+
+        {showFps ? (
+          <button className="k-btn" onClick={() => setScene({ showFps: false })} title="Click to hide FPS readout">
+            <span className="k">FPS</span><span className="v" style={{ color: fpsColor }}>{fps.toString().padStart(3, '0')}</span>
           </button>
-          <Sep />
-        </>
-      )}
-      {!showFps && (
-        <>
-          <button
-            onClick={() => setScene({ showFps: true })}
-            title="Show FPS readout"
-            className="text-cyan-glow/40 hover:text-cyan-neon"
-          >
-            FPS · ---
+        ) : (
+          <button className="k-btn" onClick={() => setScene({ showFps: true })} title="Show FPS readout">
+            <span className="k">FPS</span><span className="v" style={{ color: 'var(--t-3)' }}>---</span>
           </button>
-          <Sep />
-        </>
-      )}
-      {showMemory && (
-        <>
-          <span title="Approximate JS heap usage (Chromium only)">
-            MEM · <span className="neon-text-cyan">{memMB.toFixed(0)}MB</span>
+        )}
+
+        {showMemory && (
+          <span className="opt-hide-md" title="Approximate JS heap usage (Chromium only)">
+            <span className="k">Mem</span><span className="v">{memMB.toFixed(0)}MB</span>
           </span>
-          <Sep />
-        </>
-      )}
-      <span>BLOCKS · <span className="neon-text-cyan">{cellCount.toString().padStart(4, '0')}</span></span>
-      <Sep />
-      <span>
-        CURSOR · <span className="neon-text-cyan">
-          {hover ? `[${hover[0].toString().padStart(3)},${hover[1].toString().padStart(2)},${hover[2].toString().padStart(3)}]` : '[ — — — ]'}
+        )}
+
+        <span><span className="k">Blocks</span><span className="v">{cellCount.toLocaleString()}</span></span>
+
+        <span className="opt-hide-md">
+          <span className="k">Layer</span>
+          <span className="v">{layerName}</span>
         </span>
-      </span>
-      <Sep />
-      <span>INTEGRITY · <span className={integrityColor}>{(integrity * 100).toFixed(0)}%</span></span>
-      <div className="ml-auto flex items-center gap-4">
-        <span>UTC · <span className="neon-text-cyan">{t.toISOString().slice(11, 19)}</span></span>
-        <span className="text-magenta-glow/70">© NEON NEXUS MEGACORP // 2077</span>
+
+        <span className="opt-hide-md">
+          <span className="k">Cursor</span>
+          <span className="v">{hover ? `${hover[0]}, ${hover[1]}, ${hover[2]}` : '— — —'}</span>
+        </span>
+
+        {immersiveMode && (
+          <span><span className="k">Integrity</span><span className="v" style={{ color: integrityColor }}>{(integrity * 100).toFixed(0)}%</span></span>
+        )}
+
+        <span className="op-st-spacer" />
+
+        <span title={lastSaveError ?? 'IndexedDB autosave interval'}>
+          <span className="k">Save</span>
+          <span className="v" style={lastSaveError ? { color: 'var(--op-red)' } : undefined}>
+            {lastSaveError ? 'Failed' : saveLabel}
+          </span>
+        </span>
+
+        <span>
+          <span className="k">Tool</span>
+          <span className="v">
+            {stampArtifact ? `STAMP · ${stampArtifact.name}` : `${brush.mode.toUpperCase()} · ${brush.size}`}
+          </span>
+        </span>
+        <span className="opt-hide-sm"><span className="k">UTC</span><span className="v">{t.toISOString().slice(11, 19)}</span></span>
+        <span className="opt-hide-md" style={{ color: 'var(--accent)' }}>© Neon Nexus // 2077</span>
       </div>
     </div>
   );
-}
-
-function Sep() {
-  return <span className="text-cyan-neon/30">|</span>;
 }

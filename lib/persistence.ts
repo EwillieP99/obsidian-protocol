@@ -3,12 +3,34 @@
 import { get, set, del, keys } from 'idb-keyval';
 import { useUIStore } from '@/stores/uiStore';
 import { getVoxelEngine } from '@/engine/core/VoxelEngine';
+import { isOBS2 } from '@/engine/persist/obs2';
 import type { SerializedSave } from '@/types';
-import { SAVE_DB_KEY, AUTOSAVE_KEY } from '@/lib/constants';
+import { AUTOSAVE_KEY } from '@/lib/constants';
 
+// Phase 5b: saves are written as binary OBS2 (engine.serialize()), stored in
+// IndexedDB as ArrayBuffers. Migration is lazy and in-place — the idb keys are
+// unchanged (`save:<name>`, AUTOSAVE_KEY), so V1 JSON saves still appear in the
+// list and still load (a V1 object is re-encoded to a JSON ArrayBuffer and the
+// engine sniffs OBS2-vs-JSON on load). Each save upgrades to binary the next
+// time it's written. Repo example vaults remain `.json` and load via the same
+// sniff, so nothing about them changes.
+
+const SAVE_PREFIX = 'save:';
+
+let autosaveInFlight = false;
+
+/** A stored save is either a V2 binary buffer or a V1 JSON object (idb clone). */
+type StoredSave = ArrayBuffer | SerializedSave;
+
+/** JSON-encode a V1 save object into the ArrayBuffer shape engine.loadSave wants. */
 function encodeSave(data: SerializedSave): ArrayBuffer {
   const bytes = new TextEncoder().encode(JSON.stringify(data));
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
+/** Normalize whatever idb returns into a buffer the engine can sniff + load. */
+function toLoadBuffer(stored: StoredSave): ArrayBuffer {
+  return stored instanceof ArrayBuffer ? stored : encodeSave(stored);
 }
 
 async function withLoading<T>(message: string, fn: () => Promise<T>): Promise<T> {
@@ -22,37 +44,9 @@ async function withLoading<T>(message: string, fn: () => Promise<T>): Promise<T>
   }
 }
 
-const SAVE_PREFIX = 'save:';
-
-export function buildSerialized(name: string, thumbnail?: string): SerializedSave {
-  const engine = getVoxelEngine();
-  const cells: SerializedSave['cells'] = [];
-  let mnx = Infinity, mny = Infinity, mnz = Infinity;
-  let mxx = -Infinity, mxy = -Infinity, mxz = -Infinity;
-  for (const d of engine.getAllCells()) {
-    if (d.newBlockId === null) continue;
-    cells.push([d.x, d.y, d.z, d.newBlockId]);
-    if (d.x < mnx) mnx = d.x; if (d.y < mny) mny = d.y; if (d.z < mnz) mnz = d.z;
-    if (d.x > mxx) mxx = d.x; if (d.y > mxy) mxy = d.y; if (d.z > mxz) mxz = d.z;
-  }
-  const bounds = cells.length
-    ? { min: [mnx, mny, mnz] as [number, number, number], max: [mxx, mxy, mxz] as [number, number, number] }
-    : { min: [0, 0, 0] as [number, number, number], max: [0, 0, 0] as [number, number, number] };
-  return {
-    version: 1,
-    name,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    thumbnail,
-    bounds,
-    layers: engine.getLayers(),
-    cells,
-    contract: engine.getContract() ?? undefined,
-  };
-}
-
 export async function captureThumbnail(): Promise<string | undefined> {
-  // Find the WebGL canvas and snapshot it.
+  // Find the WebGL canvas and snapshot it. The thumbnail is embedded in the
+  // OBS2 buffer; no UI reads it back today, but it round-trips for later use.
   const canvas = document.querySelector('canvas');
   if (!canvas) return undefined;
   try {
@@ -62,18 +56,32 @@ export async function captureThumbnail(): Promise<string | undefined> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Save (binary)
+// ---------------------------------------------------------------------------
+
 export async function autoSave() {
-  const thumb = await captureThumbnail();
-  const data = buildSerialized('AUTOSAVE', thumb);
-  await set(AUTOSAVE_KEY, data);
+  if (autosaveInFlight) return;
+  autosaveInFlight = true;
+  try {
+    const thumb = await captureThumbnail();
+    const buf = await getVoxelEngine().serialize('AUTOSAVE', thumb);
+    await set(AUTOSAVE_KEY, buf);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    useUIStore.getState().setLastSaveError(msg);
+    throw err;
+  } finally {
+    autosaveInFlight = false;
+  }
 }
 
 export async function savePromptDialog(): Promise<boolean> {
   const name = window.prompt('Save vault as:', `Vault-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}`);
   if (!name) return false;
   const thumb = await captureThumbnail();
-  const data = buildSerialized(name, thumb);
-  await set(`${SAVE_PREFIX}${name}`, data);
+  const buf = await getVoxelEngine().serialize(name, thumb);
+  await set(`${SAVE_PREFIX}${name}`, buf);
   return true;
 }
 
@@ -84,25 +92,35 @@ export async function listSaves(): Promise<string[]> {
     .map((k) => k.slice(SAVE_PREFIX.length));
 }
 
-export async function loadSave(name: string): Promise<boolean> {
-  return withLoading(`LOADING ${name.toUpperCase()}`, async () => {
-    const data = await get<SerializedSave>(`${SAVE_PREFIX}${name}`);
-    if (!data) return false;
-    getVoxelEngine().loadSave(encodeSave(data));
-    return true;
-  });
-}
-
 export async function deleteSave(name: string) {
   await del(`${SAVE_PREFIX}${name}`);
 }
 
-export async function loadAutoSave(): Promise<boolean> {
-  const data = await get<SerializedSave>(AUTOSAVE_KEY);
-  if (!data) return false;
-  getVoxelEngine().loadSave(encodeSave(data));
-  return true;
+// ---------------------------------------------------------------------------
+// Load (format-agnostic — engine.loadSave sniffs OBS2 vs JSON)
+// ---------------------------------------------------------------------------
+
+export async function loadSave(name: string): Promise<boolean> {
+  return withLoading(`LOADING ${name.toUpperCase()}`, async () => {
+    const stored = await get<StoredSave>(`${SAVE_PREFIX}${name}`);
+    if (!stored) return false;
+    getVoxelEngine().loadSave(toLoadBuffer(stored));
+    return true;
+  });
 }
+
+export async function loadAutoSave(): Promise<boolean> {
+  const stored = await get<StoredSave>(AUTOSAVE_KEY);
+  if (!stored) return false;
+  return withLoading('RESTORING AUTOSAVE', async () => {
+    getVoxelEngine().loadSave(toLoadBuffer(stored));
+    return true;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Import / export (file + URL)
+// ---------------------------------------------------------------------------
 
 export async function importSaveFromUrlWithLoading(url: string, label: string): Promise<boolean> {
   return withLoading(`IMPORTING ${label.toUpperCase()}`, async () => {
@@ -110,20 +128,30 @@ export async function importSaveFromUrlWithLoading(url: string, label: string): 
   });
 }
 
-export async function importSaveJSONWithLoading(): Promise<void> {
+export async function importSaveFromUrl(url: string): Promise<boolean> {
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return false;
+    // Fetch raw bytes; the engine handles both OBS2 and legacy JSON saves.
+    getVoxelEngine().loadSave(await r.arrayBuffer());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function importSaveWithLoading(): Promise<void> {
   return new Promise((resolve, reject) => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'application/json';
+    input.accept = '.obs2,.json,application/json,application/octet-stream';
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return resolve();
       await withLoading(`IMPORTING ${file.name.toUpperCase()}`, async () => {
         try {
-          const text = await file.text();
-          const data = JSON.parse(text) as SerializedSave;
-          if (!data.cells || !Array.isArray(data.cells)) throw new Error('Invalid save');
-          getVoxelEngine().loadSave(encodeSave(data));
+          // Pass raw bytes; engine.loadSave sniffs OBS2 magic, else parses JSON.
+          getVoxelEngine().loadSave(await file.arrayBuffer());
         } catch (e) {
           reject(e);
           return;
@@ -135,48 +163,17 @@ export async function importSaveJSONWithLoading(): Promise<void> {
   });
 }
 
-export async function exportSaveJSON(): Promise<void> {
+export async function exportSave(): Promise<void> {
   const thumb = await captureThumbnail();
-  const data = buildSerialized('export', thumb);
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const buf = await getVoxelEngine().serialize('export', thumb);
+  // serialize() falls back to JSON if a worker is unavailable; pick the
+  // extension from the actual bytes so the file is always named correctly.
+  const ext = isOBS2(buf) ? 'obs2' : 'json';
+  const blob = new Blob([buf], { type: 'application/octet-stream' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `obsidian-vault-${Date.now()}.json`;
+  a.download = `obsidian-vault-${Date.now()}.${ext}`;
   a.click();
   URL.revokeObjectURL(url);
-}
-
-export async function importSaveJSON(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'application/json';
-    input.onchange = async () => {
-      try {
-        const file = input.files?.[0];
-        if (!file) return resolve();
-        const text = await file.text();
-        const data = JSON.parse(text) as SerializedSave;
-        if (!data.cells || !Array.isArray(data.cells)) throw new Error('Invalid save');
-        getVoxelEngine().loadSave(encodeSave(data));
-        resolve();
-      } catch (e) {
-        reject(e);
-      }
-    };
-    input.click();
-  });
-}
-
-export async function importSaveFromUrl(url: string): Promise<boolean> {
-  try {
-    const r = await fetch(url);
-    if (!r.ok) return false;
-    const data = (await r.json()) as SerializedSave;
-    getVoxelEngine().loadSave(encodeSave(data));
-    return true;
-  } catch {
-    return false;
-  }
 }

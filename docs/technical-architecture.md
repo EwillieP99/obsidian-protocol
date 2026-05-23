@@ -6,7 +6,7 @@ This document provides a deep dive into the technical design of Obsidian Protoco
 
 ## 0. V1 → V2 Status
 
-> **Phase tracker — 2026-05-13 — commit `2322016`**
+> **Phase tracker — 2026-05-22 — Phases 0–5 complete; Wave A product features landed**
 >
 > | Phase | Commit | Status |
 > |---|---|---|
@@ -15,18 +15,18 @@ This document provides a deep dive into the technical design of Obsidian Protoco
 > | 3.3: `Voxels.tsx` → RenderBridge thin wrapper | `2322016` | ✅ Done |
 > | 3.4: All mutation sites → `IVoxelEngine` | `2322016` | ✅ Done |
 > | 3.2: Worker as true mutation authority; retire storeUnsub | `2322016` | ✅ Done |
-> | 3.5: Retire `voxelStore`; all UI reads through engine hooks | `2322016` | ✅ Done |
-> | 4: Dedicated raycast worker | — | 🔜 Roadmap |
-> | 5: OBS2 binary persistence (compress worker) | — | 🔜 Roadmap |
+> | 3.5: Retire `voxelStore`; all UI reads through engine hooks | `8f7e9e8` | ✅ Done |
+> | 4: Dedicated raycast worker + `engine.raycast()` | `8f7e9e8` | ✅ Done (UI still uses R3F raycasting for pointer input) |
+> | 5: OBS2 binary persistence (compress worker) | — | ⏳ In progress — engine codec + compress worker wired; `lib/persistence.ts` flipping to binary I/O |
 
-**Current state (as of `2322016`):** `voxelStore` is **deleted**. All canonical voxel state lives in `voxel.worker.ts`. `VoxelEngine` keeps main-thread caches (`localCells`, `layersCache`, `statsCache`, `chronoCache`, `contractCache`) for sync reads. Worker `PATCH/STATS/CHRONO/LAYERS` replies drive the engine event bus; five reactive hooks (`useEngineStats`, `useEngineLayers`, `useEngineChrono`, `useEngineContract`, `useLayerCounts`) replace all former `useVoxelStore` selectors in UI components. `uiStore` and `effectsStore` are unchanged.
+**Current state:** `voxelStore` is **deleted**. All canonical voxel state lives in `voxel.worker.ts`. `VoxelEngine` spawns three workers (`voxel`, `raycast`, `compress`) and keeps main-thread caches for sync reads. Six reactive hooks replace all former `useVoxelStore` selectors. **Studio mode** (default) hides Immersive HUD elements via `uiStore.immersiveMode`. **Artifact Library** (`lib/artifacts.ts`) adds prefab stamp + region clipboard. `uiStore` and `effectsStore` are unchanged.
 
 V2's full mandate:
 
 1. **Tear the engine out of React.** All voxel state lives in `engine/worker/voxel.worker.ts`. React touches it only through `types/engine.ts:IVoxelEngine`.
 2. **Frame-coalesce GPU writes.** `RenderBridge` accumulates per-cell deltas and applies them in a single `flushPending()` per frame, replacing V1's full-rebuild `useEffect`.
 3. **Add chunking.** 16³ chunks with bit-packed `uint16` cells; sparse `Map<chunkKey, Chunk>` scales to 256×64×256 without changes.
-4. **Binary persistence.** Saves move from V1 JSON to OBS2 (binary + RLE) via a compress worker. ~140× smaller for typical builds. (Phase 5.)
+4. **Binary persistence.** Saves use OBS2 (binary + RLE) via `compress.worker.ts`. Engine encode/decode and user-facing IndexedDB I/O are complete (Phase 5).
 
 ---
 
@@ -39,7 +39,7 @@ V2's full mandate:
 | Post-processing    | @react-three/postprocessing        | Bloom, Glitch, Chromatic Aberration, etc. |
 | State Management   | Zustand + subscribeWithSelector    | UI + effects only; voxel state lives in engine worker |
 | Styling            | Tailwind CSS + Framer Motion       | Cyberpunk neon UI |
-| Persistence        | idb-keyval (IndexedDB)             | Autosave + named saves |
+| Persistence        | idb-keyval (IndexedDB) + OBS2      | Autosave + named saves (binary OBS2 in flight; JSON fallback on load) |
 | Audio              | Web Audio API (synthesized)        | No asset dependency |
 | Fonts              | Inter + Share Tech Mono            | Terminal + clean sans |
 | Types              | TypeScript (strict)                | Full type safety |
@@ -78,14 +78,17 @@ engine/                 # V2 ENGINE — zero React imports. Black box.
 ├── chunks/
 │   └── Chunk.ts        # Uint16Array[4096] chunk (8 KB), 16³, count cache
 ├── core/
-│   └── VoxelEngine.ts  # Main-thread singleton; spawns worker; event emitter;
+│   └── VoxelEngine.ts  # Main-thread singleton; spawns 3 workers; event emitter;
 │                       # local caches (localCells, layersCache, statsCache,
 │                       # chronoCache, futureCache, contractCache) for sync reads.
+├── persist/
+│   └── obs2.ts         # OBS2 binary save format (encode/decode/RLE; Phase 5)
 └── worker/
-    └── voxel.worker.ts # Canonical voxel state (chunks, chrono-log, layers,
-                        # incremental stats counters, 200 ms STATS tick).
-                        # Future: raycast.worker.ts (Phase 4),
-                        # compress.worker.ts (Phase 5).
+    ├── voxel.worker.ts # Canonical voxel state (chunks, chrono-log, layers,
+    │                   # incremental stats counters, 200 ms STATS tick).
+    │                   # Pushes OCCUPANCY_DELTA to raycast worker via MessageChannel.
+    ├── raycast.worker.ts # Amanatides–Woo DDA grid; answers engine.raycast()
+    └── compress.worker.ts # Stateless OBS2 encode/decode RPC (Phase 5)
 
 stores/
 ├── uiStore.ts          # Brush, panels, camera, settings, FPS. Unchanged.
@@ -95,7 +98,7 @@ lib/
 ├── blocks.ts           # 12 block definitions + BLOCK_INDEX_TABLE (V2 wire)
 ├── constants.ts        # World params + V2 chunk constants
 ├── brush.ts            # Brush shape logic (main-thread preview; unchanged)
-├── persistence.ts      # IndexedDB save/load — reads from engine; calls engine.loadSave()
+├── persistence.ts      # IndexedDB save/load via engine.serialize() / loadSave() (OBS2 + JSON sniff)
 ├── contracts.ts        # Procedural contract generator — calls engine.applyOps()
 ├── audio.ts            # Web Audio SFX
 └── utils.ts            # Helpers + V2 chunk helpers
@@ -121,7 +124,7 @@ shaders/                # Custom GLSL (6 block types with shaders)
 
 ### 3.1 Voxel Engine (The Heart)
 
-**Current state (V2, all phases through 3.5 complete):**
+**Current state (V2, Phases 0–5 complete):**
 
 - `Voxels.tsx` is a ~55-line RenderBridge thin wrapper:
   - Creates `RenderBridge` with a module-level `sharedUniforms` object
@@ -135,6 +138,10 @@ shaders/                # Custom GLSL (6 block types with shaders)
 
 - All mutations (`applyOps`, `undo`, `redo`, `clearAll`, `loadSave`, layer ops) post directly to `voxel.worker.ts`. Worker `PATCH/STATS/CHRONO/LAYERS` replies drive the engine event bus. `VoxelEngine` keeps main-thread caches for sync reads (`getBlock`, `getStats`, `getLayers`, etc.).
 
+- **Raycast worker (Phase 4):** `voxel.worker` pushes `OCCUPANCY_DELTA` pairs to `raycast.worker` over a dedicated `MessageChannel` after every mutation. `engine.raycast(origin, direction)` posts `RAY_QUERY` and returns a DDA hit. `Interaction.tsx` still uses R3F pointer raycasting for brush input — the worker API is for non-pointer queries (agents, gameplay).
+
+- **OBS2 persistence (Phase 5, complete):** `engine.serialize(name?, thumbnail?)` routes chunk buffers through `compress.worker` into an OBS2 `ArrayBuffer`. `engine.loadSave()` sniffs OBS2 magic vs JSON. `lib/persistence.ts` writes binary to IndexedDB; legacy JSON saves still load and upgrade lazily on next write.
+
 ### 3.2 State Management (Zustand)
 
 Two active stores:
@@ -147,8 +154,8 @@ All voxel data (cells, history, layers, stats, contract) lives in `voxel.worker.
 ### 3.3 Brush System
 
 Located in `lib/brush.ts`:
-- Supports 5 modes: `paint`, `erase`, `fill`, `replace`, `eyedropper`
-- 3 shapes: `cube`, `sphere`, `plane`
+- Supports 6 modes: `paint`, `erase`, `fill`, `replace`, `eyedropper`, `select`
+- 2 shapes: `rectangle`, `circle` — flat stamps on the active layer (size scales area, not volume)
 - Smart connect for power lines
 - Operations expand on the main thread (for low-latency `Cursor.tsx` preview), then pass to `engine.applyOps()` as `CellOp[]`
 
@@ -174,13 +181,13 @@ Located in `lib/brush.ts`:
 - **Incremental stats counters (✅):** `cellCount / sumStability / sumAnomaly` update inside the worker on every cell write. `computeStats()` is O(1) regardless of world size. Stats tick at 200 ms.
 - **Pre-allocated GPU buffers (✅):** 12 × `MAX_INSTANCES=16384` × 64 B = ~12 MB; no reallocation mid-session.
 - **Web Worker offload (✅):** Brush chunk writes, undo/redo deltas, integrity computation all happen in `voxel.worker.ts` off the main thread. No long tasks from voxel mutations in Chrome DevTools Performance.
-- **Zero-copy worker I/O (🔜):** Large payloads via transferable `ArrayBuffer`; no COOP/COEP headers required.
+- **Zero-copy worker I/O (✅ partial):** Occupancy deltas, OBS2 chunk buffers, and serialized saves cross worker boundaries as transferable `ArrayBuffer`s; no COOP/COEP headers required. `LOADED_CHUNKS` zero-copy load path is reserved but not wired yet.
 
 ---
 
 ## 4. Rendering Pipeline
 
-### Current flow (all phases through 3.5 complete)
+### Current flow (Phases 0–4 complete)
 
 ```
 User interaction
@@ -190,6 +197,7 @@ Interaction.tsx → getEngine().applyOps(CellOp[])
 VoxelEngine → postMessage APPLY_OPS to worker
   ↓
 voxel.worker: chunk write, chrono push, incremental stats, delta build
+  ↓ (parallel) OCCUPANCY_DELTA → raycast.worker blockIndex grid
   ↓ postMessage PATCH / STATS / CHRONO / LAYERS
 VoxelEngine.handleWorkerMessage
   ├─ PATCH  → emit engine 'patch' + update localCells cache → bridge.queueDeltas()
@@ -258,15 +266,17 @@ What V2 **changed**:
 | `stores/voxelStore.ts` | Canonical voxel data + history | 🗑 Deleted (Phase 3.5) |
 | `components/scene/Voxels.tsx` | Full-rebuild InstancedMesh per block type | ✅ RenderBridge thin wrapper (Phase 3.3) |
 | `components/scene/Interaction.tsx` | Pointer events → `voxelStore.applyOps` | ✅ `engine.applyOps` + `engine.getBlock` (Phase 3.4 / 3.5) |
-| `hooks/useKeyboardShortcuts.ts` | Undo/redo → voxelStore directly | ✅ `engine.undo/redo` (Phase 3.4) |
-| `components/ui/Toolbar.tsx` | Undo/redo/clear → voxelStore | ✅ engine (Phase 3.4 / 3.5) |
+| `hooks/useKeyboardShortcuts.ts` | Undo/redo → voxelStore directly | ✅ `engine.undo/redo` + select/copy/paste (Phase 3.4 / Wave A) |
+| `components/ui/Toolbar.tsx` | Undo/redo/clear → voxelStore | ✅ engine + collapsible groups + clipboard IO (Wave A) |
 | `components/ui/HistoryPanel.tsx` | History display + undo/redo → voxelStore | ✅ `useEngineChrono()` (Phase 3.5) |
-| `components/ui/LayerPanel.tsx` | Layer display + mutations → voxelStore | ✅ `useEngineLayers()` + `useLayerCounts()` + engine mutations (Phase 3.5) |
+| `components/ui/LayerPanel.tsx` | Layer display + mutations → voxelStore | ✅ `useEngineLayers()` + `useLayerCounts()` + `useLayerDominantBlocks()` (Wave A) |
 | `components/ui/StatusBar.tsx` | `cells.size` + `computeIntegrity()` from voxelStore | ✅ `useEngineStats()` (Phase 3.5) |
-| `components/ui/IntegrityMeter.tsx` | `computeIntegrity()` from voxelStore | ✅ `useEngineStats()` (Phase 3.5) |
+| `components/ui/IntegrityMeter.tsx` | `computeIntegrity()` from voxelStore | ✅ `useEngineStats()` + immersive gate (Wave A) |
 | `components/ui/ContractPanel.tsx` | `contract` from voxelStore | ✅ `useEngineContract()` (Phase 3.5) |
 | `hooks/useEffectBindings.ts` | voxelStore revision subscription → particles/audio | ✅ engine `'patch'` event subscription (Phase 3.5) |
-| `lib/persistence.ts` | `buildSerialized` read from voxelStore | ✅ reads from `engine.getAllCells()` / `getLayers()` / `getContract()` (Phase 3.5) |
+| `lib/persistence.ts` | `buildSerialized` read from voxelStore | ✅ `engine.serialize()` / `loadSave()` — OBS2 binary I/O (Phase 5) |
+| `lib/artifacts.ts` | — | ✅ Artifact Library + clipboard/stamp (Wave A) |
+| `components/ui/ArtifactLibraryPanel.tsx` | — | ✅ Prefab/blueprint panel (Wave A) |
 | `lib/contracts.ts` | `applyContract` clear via `store.cells` | ✅ `engine.getAllCells()` (Phase 3.5) |
 | `lib/blocks.ts` | Block definitions + stats | Extended with `BLOCK_INDEX_TABLE` for V2 wire format |
 | `lib/brush.ts` | Brush shape + operation generation | Unchanged — still used for preview + pre-engine op expansion |
@@ -281,4 +291,4 @@ What V2 **changed**:
 
 ---
 
-*Last updated: 2026-05-13. Phase 3.5 complete. Commit baseline: `2322016`.*
+*Last updated: 2026-05-21. Phases 0–5 complete; Wave A product features landing.*

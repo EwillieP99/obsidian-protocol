@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
+import { MOUSE } from 'three';
 import { useUIStore } from '@/stores/uiStore';
 import { useEffectsStore } from '@/stores/effectsStore';
 import { CAMERA_PRESETS } from '@/lib/constants';
@@ -108,6 +109,11 @@ export function CameraRig() {
       maxDistance={120}
       maxPolarAngle={Math.PI / 2 - 0.05}
       target={CAMERA_PRESETS.architect.target}
+      mouseButtons={{
+        LEFT: undefined,
+        MIDDLE: MOUSE.DOLLY,
+        RIGHT: MOUSE.ROTATE,
+      }}
     />
   );
 }

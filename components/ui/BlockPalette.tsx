@@ -1,109 +1,105 @@
 'use client';
 
-import { motion, AnimatePresence } from 'framer-motion';
 import { useUIStore } from '@/stores/uiStore';
 import { BLOCK_ORDER, BLOCK_TYPES, CATEGORY_ORDER } from '@/lib/blocks';
-import { cn } from '@/lib/utils';
 import type { BlockId } from '@/types';
+import { Building, Building2, Church, Landmark, Waves } from 'lucide-react';
+import { importSaveFromUrlWithLoading } from '@/lib/persistence';
+import { toast } from 'sonner';
+
+// Example vaults — fold the old quick-loader into the Block Matrix, matching
+// the design's "Example Vaults" list. Counts/icons are decorative.
+const VAULTS: Array<{ id: string; name: string; count: string; file: string; Icon: typeof Building }> = [
+  { id: 'megaspire',   name: 'Megaspire',           count: '3.2k', file: '/examples/megaspire.json',            Icon: Building2 },
+  { id: 'glitchfield', name: 'Glitch Field',        count: '1.8k', file: '/examples/glitchfield.json',          Icon: Waves },
+  { id: 'velvet',      name: 'Velvet Shrine',       count: '892',  file: '/examples/velvet-shrine.json',        Icon: Landmark },
+  { id: 'arcology',    name: 'Blackspire Arcology', count: '6.4k', file: '/examples/blackspire-arcology.json',  Icon: Building },
+  { id: 'cathedral',   name: 'Ghost Cathedral',     count: '4.1k', file: '/examples/ghost-cathedral.json',      Icon: Church },
+];
 
 export function BlockPalette() {
   const open = useUIStore((s) => s.panels.palette);
-  const togglePanel = useUIStore((s) => s.togglePanel);
   const activeBlock = useUIStore((s) => s.activeBlock);
   const setActiveBlock = useUIStore((s) => s.setActiveBlock);
 
+  if (!open) return null;
+
+  const loadVault = async (file: string, name: string) => {
+    const ok = await importSaveFromUrlWithLoading(file, name);
+    if (ok) toast.success(`Loaded vault: ${name}`);
+    else toast.error('Failed to load vault');
+  };
+
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          initial={{ x: -260, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          exit={{ x: -260, opacity: 0 }}
-          transition={{ type: 'spring', stiffness: 240, damping: 24 }}
-          className="absolute top-20 left-4 z-30 panel w-60 corner-bracket"
-        >
-          <header className="flex items-center justify-between px-3 py-2 border-b border-cyan-neon/20">
-            <span className="terminal text-xs neon-text-cyan">// BLOCK MATRIX</span>
-            <button
-              className="terminal text-[10px] text-cyan-glow/60 hover:text-cyan-neon"
-              onClick={() => togglePanel('palette')}
-              title="Hide palette (P)"
-            >
-              [ HIDE ]
-            </button>
-          </header>
-          <div className="p-2 max-h-[60vh] overflow-y-auto">
-            {CATEGORY_ORDER.map((cat) => {
-              const blocks = BLOCK_ORDER.filter((id) => BLOCK_TYPES[id].category === cat.id);
-              if (blocks.length === 0) return null;
-              return (
-                <div key={cat.id} className="mb-2">
-                  <div className="terminal text-[10px] text-cyan-glow/50 px-1 mb-1">/// {cat.label}</div>
-                  <div className="grid grid-cols-2 gap-1">
-                    {blocks.map((id) => (
-                      <BlockSwatch
-                        key={id}
-                        id={id}
-                        active={activeBlock === id}
-                        onClick={() => setActiveBlock(id)}
-                      />
-                    ))}
-                  </div>
+    <div className="op-left">
+      <div className="op-panel op-tick-corners">
+        <div className="op-panel-hd">
+          <div className="op-marker" />
+          <h2>Block Matrix</h2>
+          <span className="op-meta">{BLOCK_ORDER.length} / 256</span>
+        </div>
+
+        <div className="op-panel-bd">
+          <p style={{ marginBottom: 8, color: 'var(--t-3)', fontSize: 10, lineHeight: 1.45 }}>
+            Select block type to paint. Use SAMPLE (I) to pick from the canvas.
+          </p>
+          {CATEGORY_ORDER.map((cat) => {
+            const blocks = BLOCK_ORDER.filter((id) => BLOCK_TYPES[id].category === cat.id);
+            if (blocks.length === 0) return null;
+            return (
+              <div key={cat.id} style={{ display: 'contents' }}>
+                <div className="op-label">{cat.label}</div>
+                <div className="op-block-grid">
+                  {blocks.map((id) => (
+                    <BlockSwatch
+                      key={id}
+                      id={id}
+                      active={activeBlock === id}
+                      onClick={() => setActiveBlock(id)}
+                    />
+                  ))}
                 </div>
-              );
-            })}
+              </div>
+            );
+          })}
+
+          <div className="op-label" style={{ marginTop: 4 }}>Example Vaults</div>
+          <div className="op-vaults">
+            {VAULTS.map(({ id, name, count, file, Icon }) => (
+              <button key={id} className="op-vault" onClick={() => loadVault(file, name)} title={`Load ${name}`}>
+                <span className="op-vicon"><Icon size={16} /></span>
+                <span className="op-vname">{name}</span>
+                <span className="op-vcount">{count}</span>
+              </button>
+            ))}
           </div>
-          <div className="px-3 py-2 border-t border-cyan-neon/20 terminal text-[10px] text-cyan-glow/60">
-            Right-click drag = quick erase
-          </div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+        </div>
+      </div>
+    </div>
   );
 }
 
 function BlockSwatch({ id, active, onClick }: { id: BlockId; active: boolean; onClick: () => void }) {
   const b = BLOCK_TYPES[id];
   const glow = b.emissiveIntensity > 0;
+  const swatchColor = glow ? b.emissive : b.color;
+  const tag = b.shader ? 'SHDR' : glow ? 'EMIT' : null;
   return (
-    <motion.button
-      whileHover={{ scale: 1.04, y: -1 }}
-      whileTap={{ scale: 0.96 }}
+    <button
+      type="button"
+      className="op-block"
+      aria-pressed={active}
       onClick={onClick}
-      className={cn(
-        'group relative flex flex-col items-stretch gap-1 px-2 py-1.5 border transition-colors',
-        active
-          ? 'border-cyan-neon bg-cyan-neon/15'
-          : 'border-cyan-neon/15 hover:border-cyan-neon/60 hover:bg-cyan-neon/5',
-      )}
       title={`${b.loreName} — ${b.description}`}
-      style={
-        active
-          ? { boxShadow: `0 0 14px ${b.emissive}80, inset 0 0 8px ${b.emissive}50` }
-          : undefined
-      }
+      style={{ ['--c' as string]: swatchColor }}
     >
-      <div
-        className="w-full h-7 border border-white/10"
-        style={{
-          background: b.color,
-          boxShadow: glow ? `0 0 12px ${b.emissive}, inset 0 0 6px ${b.emissive}` : 'none',
-        }}
-      />
-      <div className="terminal text-[10px] text-cyan-glow/85 truncate">{b.name}</div>
-      {b.shader && (
-        <span className="absolute top-1 right-1 terminal text-[8px] neon-text-magenta">SHDR</span>
-      )}
-      {active && (
-        <motion.span
-          layoutId="palette-active-pulse"
-          className="absolute -inset-px pointer-events-none"
-          style={{
-            border: `1px solid ${b.emissive}`,
-            boxShadow: `0 0 18px ${b.emissive}, inset 0 0 8px ${b.emissive}80`,
-          }}
-        />
-      )}
-    </motion.button>
+      <span className="op-swatch" data-kind={glow ? 'glow' : 'solid'} />
+      <span className="op-name">{b.name}</span>
+      <span className="op-bmeta">
+        <span style={{ width: 5, height: 5, background: swatchColor, boxShadow: `0 0 4px ${swatchColor}`, borderRadius: 2 }} />
+        {glow ? 'emissive' : 'solid'}
+      </span>
+      {tag && <span className={`op-tag${b.shader ? ' shdr' : ''}`}>{tag}</span>}
+    </button>
   );
 }

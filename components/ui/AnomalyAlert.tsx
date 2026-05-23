@@ -6,6 +6,9 @@ import { AlertTriangle } from 'lucide-react';
 
 export function AnomalyAlert() {
   const alert = useUIStore((s) => s.anomalyAlert);
+  const immersiveMode = useUIStore((s) => s.immersiveMode);
+
+  if (!immersiveMode) return null;
 
   return (
     <AnimatePresence>

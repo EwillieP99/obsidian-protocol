@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import { getVoxelEngine } from '@/engine/core/VoxelEngine';
 import type { IVoxelEngine, EngineStats, LayerMeta, ChronoEntry } from '@/types/engine';
 import type { Contract } from '@/types';
+import { useUIStore } from '@/stores/uiStore';
 
 export function useEngine(): { engine: IVoxelEngine; ready: boolean } {
   const engine = getVoxelEngine();
@@ -18,6 +20,30 @@ export function useEngine(): { engine: IVoxelEngine; ready: boolean } {
   }, [engine]);
 
   return { engine, ready };
+}
+
+/** Subscribe to engine errors and degraded worker state for user-visible feedback. */
+export function useEngineErrorHandler(): void {
+  useEffect(() => {
+    const engine = getVoxelEngine();
+    const syncDegraded = () => {
+      useUIStore.getState().setEngineDegraded(engine.isDegraded());
+    };
+
+    syncDegraded();
+    const offReady = engine.on('ready', syncDegraded);
+    const offError = engine.on('error', (e) => {
+      toast.error(e.message, { duration: 6000 });
+      syncDegraded();
+    });
+
+    const poll = window.setInterval(syncDegraded, 2000);
+    return () => {
+      offReady();
+      offError();
+      window.clearInterval(poll);
+    };
+  }, []);
 }
 
 export function getEngine(): IVoxelEngine {
@@ -114,4 +140,33 @@ export function useLayerCounts(): Map<number, number> {
   }, []);
 
   return counts;
+}
+
+/**
+ * Returns the top-4 block IDs by count per layer, recomputed on every patch.
+ * Used for visual block-type swatches in the layer panel.
+ */
+export function useLayerDominantBlocks(): Map<number, string[]> {
+  const compute = (): Map<number, string[]> => {
+    const byLayer = new Map<number, Map<string, number>>();
+    for (const d of getEngine().getAllCells()) {
+      if (!d.newBlockId) continue;
+      let m = byLayer.get(d.layer);
+      if (!m) { m = new Map(); byLayer.set(d.layer, m); }
+      m.set(d.newBlockId, (m.get(d.newBlockId) ?? 0) + 1);
+    }
+    const result = new Map<number, string[]>();
+    for (const [layerId, typeCounts] of byLayer) {
+      const sorted = [...typeCounts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 4)
+        .map(([id]) => id);
+      result.set(layerId, sorted);
+    }
+    return result;
+  };
+
+  const [data, setData] = useState<Map<number, string[]>>(compute);
+  useEffect(() => getEngine().on('patch', () => setData(compute())), []);
+  return data;
 }

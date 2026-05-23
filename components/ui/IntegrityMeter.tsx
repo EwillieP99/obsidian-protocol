@@ -10,8 +10,14 @@ export function IntegrityMeter() {
   const setScene = useUIStore((s) => s.setScene);
   const setAlert = useUIStore((s) => s.setAnomalyAlert);
   const alert = useUIStore((s) => s.anomalyAlert);
+  const immersiveMode = useUIStore((s) => s.immersiveMode);
 
   useEffect(() => {
+    if (!immersiveMode) {
+      setScene({ glitchEffect: false });
+      if (alert) setAlert(null);
+      return;
+    }
     if (integrity < 0.4) {
       setScene({ glitchEffect: true });
       if (!alert) setAlert('VAULT DESTABILIZING — purge anomalies or stabilize core nodes.');
@@ -19,7 +25,9 @@ export function IntegrityMeter() {
       setScene({ glitchEffect: false });
       if (alert && integrity > 0.55) setAlert(null);
     }
-  }, [integrity, setScene, setAlert, alert]);
+  }, [immersiveMode, integrity, setScene, setAlert, alert]);
+
+  if (!immersiveMode) return null;
 
   const pct = Math.round(integrity * 100);
   const status =

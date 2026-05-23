@@ -10,13 +10,16 @@ import { Interaction } from './Interaction';
 import { CameraRig } from './CameraRig';
 import { PostFX } from './PostFX';
 import { AmbientDrones } from './AmbientDrones';
+import { SelectionBox } from './SelectionBox';
+import { SceneErrorBoundary } from './SceneErrorBoundary';
 import { FpsTracker } from './FpsTracker';
 import { SceneEffects } from './SceneEffects';
 import { CAMERA_PRESETS } from '@/lib/constants';
 
 export function Scene({ onCanvasReady }: { onCanvasReady?: (gl: THREE.WebGLRenderer) => void }) {
   return (
-    <Canvas
+    <SceneErrorBoundary>
+      <Canvas
       shadows={false}
       dpr={[1, 2]}
       gl={{
@@ -57,11 +60,13 @@ export function Scene({ onCanvasReady }: { onCanvasReady?: (gl: THREE.WebGLRende
           <Voxels />
         </Interaction>
         <Cursor />
+        <SelectionBox />
         <SceneEffects />
         <AmbientDrones />
         <PostFX />
         <FpsTracker />
       </Suspense>
     </Canvas>
+    </SceneErrorBoundary>
   );
 }

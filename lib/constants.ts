@@ -27,11 +27,15 @@ export const ENGINE_CHRONO_LIMIT = 100;
 // anomaly / cellCount and emits STATS. Drives the HUD update rate.
 export const STATS_TICK_MS = 200;
 
-// V2 storage keys (V1 keys preserved below for migration discovery).
+// V2 storage keys. Persistence reuses v1 idb keys (`save:<name>`, AUTOSAVE_KEY)
+// with binary OBS2 payloads — lazy JSON→OBS2 migration on write. The *_V2
+// aliases below are reserved for a future namespace split if needed.
 export const SAVE_DB_KEY = 'obsidian-protocol-saves-v1';
 export const PREFS_KEY = 'obsidian-protocol-prefs-v1';
 export const AUTOSAVE_KEY = 'obsidian-protocol-autosave-v1';
+/** @deprecated Reserved — persistence uses AUTOSAVE_KEY with OBS2 payloads today. */
 export const AUTOSAVE_KEY_V2 = 'obsidian-protocol-autosave-v2';
+/** @deprecated Reserved — persistence uses save: prefix with OBS2 payloads today. */
 export const SAVE_DB_KEY_V2 = 'obsidian-protocol-saves-v2';
 
 // History

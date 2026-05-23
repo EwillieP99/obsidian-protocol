@@ -15,8 +15,11 @@ const HAZARD_COLOR: Record<'low' | 'medium' | 'high' | 'critical', string> = {
 
 export function ContractPanel() {
   const open = useUIStore((s) => s.panels.contract);
+  const immersiveMode = useUIStore((s) => s.immersiveMode);
   const togglePanel = useUIStore((s) => s.togglePanel);
   const contract = useEngineContract();
+
+  if (!immersiveMode) return null;
 
   const handleNew = () => {
     const c = generateContract();

@@ -9,7 +9,7 @@
 
 import { BLOCK_INDEX_TABLE, BLOCK_TYPES, blockIdToIndex, indexToBlockId } from '@/lib/blocks';
 import { ENGINE_CHRONO_LIMIT, STATS_TICK_MS, WORLD_HEIGHT, WORLD_SIZE, WORLD_Y_ROUNDED } from '@/lib/constants';
-import { cellLinearIdx, key, unkey } from '@/lib/utils';
+import { cellLinearIdx, key, unkey, inWorld } from '@/lib/utils';
 import type { BlockId, Contract, SerializedSave } from '@/types';
 import type {
   CellDelta,
@@ -25,6 +25,8 @@ import type {
 } from '@/types/engine';
 import type {
   BlockTableEntry,
+  CompressToMainMsg,
+  MainToCompressMsg,
   MainToRaycastMsg,
   MainToVoxelMsg,
   RaycastToMainMsg,
@@ -33,6 +35,11 @@ import type {
   WireOp,
   WireRayHit,
 } from '@/engine/bridge/WorkerProtocol';
+import { isOBS2 } from '@/engine/persist/obs2';
+
+// Inbound message variants the engine awaits via pending-promise maps.
+type SerializedRawMsg = Extract<VoxelToMainMsg, { type: 'SERIALIZED_RAW' }>;
+type DecodedMsg = Extract<CompressToMainMsg, { type: 'DECODED' }>;
 
 // ---------------------------------------------------------------------------
 // Default layer configuration (moved here from voxelStore)
@@ -91,6 +98,48 @@ class TypedEmitter {
 // ---------------------------------------------------------------------------
 // Helpers — used by loadSave's synchronous patch emission
 // ---------------------------------------------------------------------------
+
+const SERIALIZE_TIMEOUT_MS = 30_000;
+const RAYCAST_TIMEOUT_MS = 5_000;
+const DECODE_TIMEOUT_MS = 30_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${ms}ms`)),
+      ms,
+    );
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
+function rejectPendingMap<K>(
+  map: Map<K, { reject: (err: Error) => void }>,
+  err: Error,
+): void {
+  for (const pending of map.values()) pending.reject(err);
+  map.clear();
+}
+
+function validateSerializedSave(save: SerializedSave): void {
+  if (!Array.isArray(save.cells)) throw new Error('Invalid save: cells must be an array');
+  for (const entry of save.cells) {
+    if (!Array.isArray(entry) || entry.length !== 4) {
+      throw new Error('Invalid save: malformed cell entry');
+    }
+    const [x, y, z, blockId] = entry;
+    if (typeof x !== 'number' || typeof y !== 'number' || typeof z !== 'number') {
+      throw new Error('Invalid save: cell coordinates must be numbers');
+    }
+    if (!inWorld(x, y, z)) {
+      throw new Error(`Invalid save: cell out of bounds (${x},${y},${z})`);
+    }
+    if (blockId !== null) blockIdToIndex(blockId as BlockId);
+  }
+}
 
 function bakedOpacity(blockId: BlockId | null, layer: LayerMeta | undefined): number {
   if (blockId === null) return 0;
@@ -151,6 +200,24 @@ export class VoxelEngine implements IVoxelEngine {
     { resolve: (v: RaycastResult | null) => void; reject: (err: Error) => void }
   >();
 
+  // Phase 5 — compress worker (stateless OBS2 codec). serialize() round-trips
+  // SERIALIZE -> SERIALIZED_RAW (voxel.worker) -> ENCODE -> ENCODED (here).
+  private compressWorker: Worker | null = null;
+  private compressReady = false;
+  private compressReqSeq = 0;
+  private pendingSerialize = new Map<
+    number,
+    { resolve: (msg: SerializedRawMsg) => void; reject: (err: Error) => void }
+  >();
+  private pendingEncode = new Map<
+    number,
+    { resolve: (buffer: ArrayBuffer) => void; reject: (err: Error) => void }
+  >();
+  private pendingDecode = new Map<
+    number,
+    { resolve: (msg: DecodedMsg) => void; reject: (err: Error) => void }
+  >();
+
   init(): Promise<void> {
     if (this.readyPromise) return this.readyPromise;
     this.readyPromise = new Promise<void>((resolve, reject) => {
@@ -167,6 +234,13 @@ export class VoxelEngine implements IVoxelEngine {
         // eslint-disable-next-line no-console
         console.warn('[VoxelEngine] voxel.worker spawn failed; running without worker:', err);
         this.worker = null;
+      }
+      try {
+        this.spawnCompressWorker();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[VoxelEngine] compress.worker spawn failed; serialize() falls back to JSON:', err);
+        this.compressWorker = null;
       }
 
       this.ready = true;
@@ -227,6 +301,63 @@ export class VoxelEngine implements IVoxelEngine {
     };
   }
 
+  private spawnCompressWorker(): void {
+    const w = new Worker(new URL('../worker/compress.worker.ts', import.meta.url), {
+      type: 'module',
+      name: 'compress-engine',
+    });
+    this.compressWorker = w;
+    this.compressReady = false;
+
+    w.onmessage = (ev: MessageEvent<CompressToMainMsg>) => this.handleCompressMessage(ev.data);
+    w.onerror = (ev) => {
+      // eslint-disable-next-line no-console
+      console.error('[VoxelEngine] compress worker error', ev.message);
+      this.emitter.emit({ type: 'error', message: ev.message || 'compress.worker error' });
+    };
+
+    w.postMessage({ type: 'INIT' } satisfies MainToCompressMsg);
+  }
+
+  private handleCompressMessage(msg: CompressToMainMsg): void {
+    switch (msg.type) {
+      case 'READY':
+        this.compressReady = true;
+        break;
+      case 'ENCODED': {
+        const pending = this.pendingEncode.get(msg.requestId);
+        if (!pending) return;
+        this.pendingEncode.delete(msg.requestId);
+        pending.resolve(msg.buffer);
+        break;
+      }
+      case 'DECODED': {
+        const pending = this.pendingDecode.get(msg.requestId);
+        if (!pending) return;
+        this.pendingDecode.delete(msg.requestId);
+        pending.resolve(msg);
+        break;
+      }
+      case 'ERROR': {
+        // eslint-disable-next-line no-console
+        console.error('[VoxelEngine] compress.worker error:', msg.message);
+        if (msg.requestId !== undefined) {
+          const err = new Error(msg.message);
+          this.pendingEncode.get(msg.requestId)?.reject(err);
+          this.pendingEncode.delete(msg.requestId);
+          this.pendingDecode.get(msg.requestId)?.reject(err);
+          this.pendingDecode.delete(msg.requestId);
+        }
+        this.emitter.emit({ type: 'error', message: msg.message });
+        break;
+      }
+      default: {
+        const _exhaustive: never = msg;
+        void _exhaustive;
+      }
+    }
+  }
+
   /**
    * Send INIT to voxel.worker. Always opens a fresh MessageChannel for the
    * voxel<->raycast bridge: re-INIT (loadSave path) discards the old channel
@@ -285,6 +416,7 @@ export class VoxelEngine implements IVoxelEngine {
       case 'ERROR':
         // eslint-disable-next-line no-console
         console.error('[VoxelEngine] raycast.worker error:', msg.message);
+        rejectPendingMap(this.pendingRaycasts, new Error(msg.message));
         this.emitter.emit({ type: 'error', message: msg.message });
         break;
       default: {
@@ -336,11 +468,16 @@ export class VoxelEngine implements IVoxelEngine {
         this.emitter.emit({ type: 'layers', layers: msg.layers, activeLayer: msg.activeLayer });
         break;
 
-      case 'SERIALIZED_RAW':
-        // Phase 5: compress.worker hand-off goes here.
+      case 'SERIALIZED_RAW': {
+        const pending = this.pendingSerialize.get(msg.requestId);
+        if (!pending) break;
+        this.pendingSerialize.delete(msg.requestId);
+        pending.resolve(msg);
         break;
+      }
 
       case 'ERROR':
+        rejectPendingMap(this.pendingSerialize, new Error(msg.message));
         this.emitter.emit({ type: 'error', message: msg.message });
         break;
 
@@ -402,12 +539,30 @@ export class VoxelEngine implements IVoxelEngine {
       this.raycastWorker.terminate();
       this.raycastWorker = null;
     }
+    if (this.compressWorker) {
+      try {
+        this.compressWorker.postMessage({ type: 'DISPOSE' } satisfies MainToCompressMsg);
+      } catch {
+        // Worker may already be dead.
+      }
+      this.compressWorker.terminate();
+      this.compressWorker = null;
+    }
     // Reject any in-flight ray queries so callers don't hang forever.
     for (const pending of this.pendingRaycasts.values()) {
       pending.resolve(null);
     }
     this.pendingRaycasts.clear();
+    // Reject in-flight serialize/encode/decode promises so awaiters unblock.
+    const disposed = new Error('VoxelEngine disposed');
+    for (const p of this.pendingSerialize.values()) p.reject(disposed);
+    this.pendingSerialize.clear();
+    for (const p of this.pendingEncode.values()) p.reject(disposed);
+    this.pendingEncode.clear();
+    for (const p of this.pendingDecode.values()) p.reject(disposed);
+    this.pendingDecode.clear();
     this.raycastReady = false;
+    this.compressReady = false;
     this.workerReady = false;
     this.emitter.dispose();
     this.ready = false;
@@ -446,36 +601,114 @@ export class VoxelEngine implements IVoxelEngine {
   }
 
   loadSave(data: ArrayBuffer): void {
-    const json = new TextDecoder().decode(new Uint8Array(data));
-    const save = JSON.parse(json) as SerializedSave;
-
-    // Update local caches immediately so sync reads stay consistent.
-    this.localCells = new Map(save.cells.map(([x, y, z, b]) => [key(x, y, z), b]));
-    const layers = save.layers.length > 0 ? save.layers : makeDefaultLayers();
-    this.layersCache = layers;
-    this.activeLayerCache = 0;
-    this.contractCache = save.contract ?? null;
-    this.chronoCache = [];
-    this.futureCache = [];
-
-    // Emit patch event so RenderBridge clears and rebuilds from the new cells.
-    this.emitter.emit({
-      type: 'patch',
-      deltas: deltasFromCells(this.localCells, this.layersCache),
-      label: `Load: ${save.name ?? 'vault'}`,
-      clearBeforeApply: true,
-    });
-
-    // Emit layers and contract events so UI components that subscribe update.
-    this.emitter.emit({ type: 'layers', layers: this.layersCache, activeLayer: 0 });
-    this.emitter.emit({ type: 'contract', contract: this.contractCache });
-
-    // Re-seed the worker. Worker will reply READY / LAYERS / CHRONO / STATS.
-    // A fresh MessageChannel is opened inside postVoxelInit so the raycast
-    // worker resets its occupancy buffer for the new world.
-    if (this.worker) {
-      this.postVoxelInit(this.buildSeedOps(this.localCells));
+    // Binary OBS2 save → decode off-thread, then re-seed via the same path the
+    // JSON loader uses. Legacy JSON saves (and the case where the compress
+    // worker failed to spawn) fall through to the V1 parser below.
+    if (isOBS2(data) && this.compressWorker && this.compressReady) {
+      this.loadSaveOBS2(data);
+      return;
     }
+
+    try {
+      const json = new TextDecoder().decode(new Uint8Array(data));
+      const save = JSON.parse(json) as SerializedSave;
+      validateSerializedSave(save);
+
+      // Update local caches immediately so sync reads stay consistent.
+      this.localCells = new Map(save.cells.map(([x, y, z, b]) => [key(x, y, z), b]));
+      const layers = save.layers.length > 0 ? save.layers : makeDefaultLayers();
+      this.layersCache = layers;
+      this.activeLayerCache = 0;
+      this.contractCache = save.contract ?? null;
+      this.chronoCache = [];
+      this.futureCache = [];
+
+      // Emit patch event so RenderBridge clears and rebuilds from the new cells.
+      this.emitter.emit({
+        type: 'patch',
+        deltas: deltasFromCells(this.localCells, this.layersCache),
+        label: `Load: ${save.name ?? 'vault'}`,
+        clearBeforeApply: true,
+      });
+
+      // Emit layers and contract events so UI components that subscribe update.
+      this.emitter.emit({ type: 'layers', layers: this.layersCache, activeLayer: 0 });
+      this.emitter.emit({ type: 'contract', contract: this.contractCache });
+
+      // Re-seed the worker. Worker will reply READY / LAYERS / CHRONO / STATS.
+      // A fresh MessageChannel is opened inside postVoxelInit so the raycast
+      // worker resets its occupancy buffer for the new world.
+      if (this.worker) {
+        this.postVoxelInit(this.buildSeedOps(this.localCells));
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // eslint-disable-next-line no-console
+      console.error('[VoxelEngine] JSON load failed:', message);
+      this.emitter.emit({ type: 'error', message: `Load failed: ${message}` });
+    }
+  }
+
+  /**
+   * OBS2 load path. Decodes off the main thread on the compress worker, then
+   * rebuilds the shadow cell map, emits the same clear+patch / layers /
+   * contract events the JSON loader emits, and re-seeds the voxel worker via
+   * INIT. loadSave() stays `void` (UI doesn't await it); errors surface as an
+   * 'error' event.
+   */
+  private loadSaveOBS2(data: ArrayBuffer): void {
+    const requestId = ++this.compressReqSeq;
+    withTimeout(
+      new Promise<DecodedMsg>((resolve, reject) => {
+        this.pendingDecode.set(requestId, { resolve, reject });
+        // No transfer: decode is rare and keeping the source buffer valid avoids
+        // surprising any caller that still references it.
+        this.compressWorker!.postMessage({ type: 'DECODE', requestId, buffer: data } satisfies MainToCompressMsg);
+      }),
+      DECODE_TIMEOUT_MS,
+      'OBS2 decode',
+    )
+      .then((decoded) => {
+        const cells = new Map<string, BlockId>();
+        for (const ce of decoded.chunks) {
+          const arr = new Uint16Array(ce.data);
+          for (let li = 0; li < arr.length; li++) {
+            const blockIndex = arr[li] & 0xff;
+            if (blockIndex === 0) continue;
+            const id = indexToBlockId(blockIndex);
+            if (id === null) continue;
+            const lx = li & 0xf;
+            const lz = (li >> 4) & 0xf;
+            const ly = (li >> 8) & 0xf;
+            cells.set(key(ce.cx * 16 + lx, ce.cy * 16 + ly, ce.cz * 16 + lz), id);
+          }
+        }
+
+        this.localCells = cells;
+        this.layersCache = decoded.layers.length > 0 ? decoded.layers : makeDefaultLayers();
+        this.activeLayerCache = 0;
+        this.contractCache = decoded.contract ?? null;
+        this.chronoCache = [];
+        this.futureCache = [];
+
+        this.emitter.emit({
+          type: 'patch',
+          deltas: deltasFromCells(this.localCells, this.layersCache),
+          label: `Load: ${decoded.name || 'vault'}`,
+          clearBeforeApply: true,
+        });
+        this.emitter.emit({ type: 'layers', layers: this.layersCache, activeLayer: 0 });
+        this.emitter.emit({ type: 'contract', contract: this.contractCache });
+
+        if (this.worker) {
+          this.postVoxelInit(this.buildSeedOps(this.localCells));
+        }
+      })
+      .catch((err: unknown) => {
+        // eslint-disable-next-line no-console
+        console.error('[VoxelEngine] OBS2 load failed:', err);
+        this.emitter.emit({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+      });
   }
 
   // ---- Layer control -------------------------------------------------------
@@ -526,8 +759,54 @@ export class VoxelEngine implements IVoxelEngine {
     return deltasFromCells(this.localCells, this.layersCache);
   }
 
-  async serialize(): Promise<ArrayBuffer> {
-    // Phase 1 stub: V1 JSON format. Phase 5 routes this to compress.worker.
+  async serialize(name?: string, thumbnail?: string): Promise<ArrayBuffer> {
+    // Binary OBS2 path needs both the voxel worker (to export raw chunks) and
+    // the compress worker (to encode). If either is unavailable — e.g. a worker
+    // failed to spawn — fall back to the V1 JSON encoder so saves never break.
+    if (!this.worker || !this.workerReady || !this.compressWorker || !this.compressReady) {
+      return this.serializeLegacyJSON(name);
+    }
+
+    const serializeId = ++this.compressReqSeq;
+    const raw = await withTimeout(
+      new Promise<SerializedRawMsg>((resolve, reject) => {
+        this.pendingSerialize.set(serializeId, { resolve, reject });
+        this.worker!.postMessage({
+          type: 'SERIALIZE',
+          requestId: serializeId,
+          name: name ?? 'vault',
+          thumbnail,
+        } satisfies MainToVoxelMsg);
+      }),
+      SERIALIZE_TIMEOUT_MS,
+      'serialize',
+    );
+
+    const encodeId = ++this.compressReqSeq;
+    return withTimeout(
+      new Promise<ArrayBuffer>((resolve, reject) => {
+        this.pendingEncode.set(encodeId, { resolve, reject });
+        // Transfer the cloned chunk buffers onward to the encoder (zero-copy).
+        this.compressWorker!.postMessage(
+          {
+            type: 'ENCODE',
+            requestId: encodeId,
+            chunks: raw.chunks,
+            layers: raw.layers,
+            contract: raw.contract,
+            name: raw.name,
+            thumbnail: raw.thumbnail,
+            cellCount: raw.cellCount,
+          } satisfies MainToCompressMsg,
+          raw.chunks.map((c) => c.data),
+        );
+      }),
+      SERIALIZE_TIMEOUT_MS,
+      'encode',
+    );
+  }
+
+  private async serializeLegacyJSON(name?: string): Promise<ArrayBuffer> {
     const cells: Array<[number, number, number, BlockId]> = [];
     let mnx = Infinity, mny = Infinity, mnz = Infinity;
     let mxx = -Infinity, mxy = -Infinity, mxz = -Infinity;
@@ -542,7 +821,7 @@ export class VoxelEngine implements IVoxelEngine {
       : { min: [0, 0, 0] as [number, number, number], max: [0, 0, 0] as [number, number, number] };
     const save: SerializedSave = {
       version: 1,
-      name: 'vault',
+      name: name ?? 'vault',
       createdAt: Date.now(),
       updatedAt: Date.now(),
       bounds,
@@ -561,15 +840,19 @@ export class VoxelEngine implements IVoxelEngine {
     const w = this.raycastWorker;
     if (!w || !this.raycastReady) return null;
     const requestId = ++this.raycastReqSeq;
-    return new Promise<RaycastResult | null>((resolve, reject) => {
-      this.pendingRaycasts.set(requestId, { resolve, reject });
-      w.postMessage({
-        type: 'RAY_QUERY',
-        requestId,
-        origin,
-        direction,
-      } satisfies MainToRaycastMsg);
-    });
+    return withTimeout(
+      new Promise<RaycastResult | null>((resolve, reject) => {
+        this.pendingRaycasts.set(requestId, { resolve, reject });
+        w.postMessage({
+          type: 'RAY_QUERY',
+          requestId,
+          origin,
+          direction,
+        } satisfies MainToRaycastMsg);
+      }),
+      RAYCAST_TIMEOUT_MS,
+      'raycast',
+    );
   }
 
   // ---- Contract ------------------------------------------------------------
@@ -585,6 +868,14 @@ export class VoxelEngine implements IVoxelEngine {
   }
 
   // ---- Subscriptions -------------------------------------------------------
+
+  isDegraded(): boolean {
+    return !this.worker || !this.workerReady;
+  }
+
+  isWorkerReady(): boolean {
+    return !!this.worker && this.workerReady;
+  }
 
   on<T extends EngineEventType>(event: T, handler: EngineEventHandler<T>): () => void {
     return this.emitter.on(event, handler);

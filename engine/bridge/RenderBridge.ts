@@ -47,6 +47,7 @@ export class SlotAllocator {
     if (this.freeList.length > 0) {
       slot = this.freeList.pop()!;
     } else {
+      if (this.nextSlot >= MAX_INSTANCES) return -1;
       slot = this.nextSlot++;
     }
     this.slotMap.set(cellIdx, slot);
@@ -336,6 +337,11 @@ export class RenderBridge {
         const allocator = this.allocatorByIndex[newBlockIdx];
         if (mesh && allocator) {
           const slot = allocator.alloc(d.cellIdx);
+          if (slot < 0) {
+            // eslint-disable-next-line no-console
+            console.error('[RenderBridge] MAX_INSTANCES exceeded for block index', newBlockIdx);
+            continue;
+          }
           dummyObject.position.set(d.x, d.y, d.z);
           dummyObject.rotation.set(0, 0, 0);
           dummyObject.scale.setScalar(1);

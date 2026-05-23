@@ -113,7 +113,7 @@ export interface IVoxelEngine {
   getBlock(x: number, y: number, z: number): BlockId | undefined;
 
   // ---- Async I/O ----
-  serialize(): Promise<ArrayBuffer>;
+  serialize(name?: string, thumbnail?: string): Promise<ArrayBuffer>;
   raycast(
     origin: [number, number, number],
     direction: [number, number, number],
@@ -125,6 +125,10 @@ export interface IVoxelEngine {
   // ---- Lifecycle / subscriptions ----
   init(): Promise<void>;
   dispose(): void;
+  /** True when the voxel worker failed to spawn or is not yet READY. */
+  isDegraded(): boolean;
+  /** True when the voxel worker has replied READY and accepts mutations. */
+  isWorkerReady(): boolean;
   on<T extends EngineEventType>(event: T, handler: EngineEventHandler<T>): () => void;
 
   // ---- Contract ----

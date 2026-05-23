@@ -2,12 +2,22 @@
 
 import { motion, AnimatePresence } from 'framer-motion';
 import { useUIStore } from '@/stores/uiStore';
+import { SETTINGS_PRESETS } from '@/lib/settingsPresets';
 import type { QualityPreset } from '@/types';
 
 const QUALITY_PRESETS: Array<{ id: QualityPreset; label: string; tip: string }> = [
   { id: 'high',        label: 'HIGH',        tip: 'Full bloom + chromatic + scanlines + drones.' },
   { id: 'balanced',    label: 'BALANCED',    tip: 'Reduced bloom kernel, no scanlines, fewer drones.' },
   { id: 'performance', label: 'PERFORMANCE', tip: 'Minimal postprocessing, fewest drones, no shimmer.' },
+];
+
+// Accent options from the Obsidian Protocol design handoff.
+const ACCENTS: Array<{ hex: string; name: string }> = [
+  { hex: '#38e1ff', name: 'Azure' },
+  { hex: '#ff2e88', name: 'Crimson' },
+  { hex: '#ffb547', name: 'Amber' },
+  { hex: '#5cff8a', name: 'Toxic' },
+  { hex: '#a25cff', name: 'Violet' },
 ];
 
 export function SettingsPanel() {
@@ -17,6 +27,12 @@ export function SettingsPanel() {
   const setScene = useUIStore((s) => s.setScene);
   const renderer = useUIStore((s) => s.rendererMode);
   const setRenderer = useUIStore((s) => s.setRendererMode);
+  const immersiveMode = useUIStore((s) => s.immersiveMode);
+  const setImmersiveMode = useUIStore((s) => s.setImmersiveMode);
+  const theme = useUIStore((s) => s.theme);
+  const setTheme = useUIStore((s) => s.setTheme);
+  const activeSettingsPreset = useUIStore((s) => s.activeSettingsPreset);
+  const applySettingsPreset = useUIStore((s) => s.applySettingsPreset);
 
   return (
     <AnimatePresence>
@@ -26,9 +42,9 @@ export function SettingsPanel() {
           animate={{ x: 0, opacity: 1 }}
           exit={{ x: 320, opacity: 0 }}
           transition={{ type: 'spring', stiffness: 240, damping: 24 }}
-          className="absolute bottom-12 right-4 z-30 panel w-80 corner-bracket"
+          className="absolute top-16 bottom-12 right-4 z-30 panel w-80 corner-bracket flex flex-col min-h-0"
         >
-          <header className="flex items-center justify-between px-3 py-2 border-b border-cyan-neon/20">
+          <header className="flex items-center justify-between px-3 py-2 border-b border-cyan-neon/20 flex-shrink-0">
             <span className="terminal text-xs neon-text-cyan">// SCENE PARAMS</span>
             <button
               className="terminal text-[10px] text-cyan-glow/70 hover:text-cyan-neon"
@@ -37,7 +53,110 @@ export function SettingsPanel() {
               [ HIDE ]
             </button>
           </header>
-          <div className="p-3 space-y-3">
+          <div className="overflow-y-auto flex-1 min-h-0 p-3 space-y-3">
+            <div>
+              <div className="terminal text-[10px] neon-text-cyan mb-1">// PRESETS</div>
+              <div className="terminal text-[9px] text-cyan-glow/45 mb-1.5">
+                Presets configure scene + UI theme together. Fine-tune below.
+              </div>
+              <div className="grid grid-cols-4 gap-1">
+                {SETTINGS_PRESETS.map((p) => (
+                  <button
+                    key={p.id}
+                    className="btn-neon !text-[10px]"
+                    data-active={activeSettingsPreset === p.id}
+                    onClick={() => applySettingsPreset(p.id)}
+                    title={p.tip}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="border-t border-cyan-neon/15" />
+            {/* Immersive Mode */}
+            <div>
+              <Toggle
+                label="IMMERSIVE MODE"
+                value={immersiveMode}
+                onChange={setImmersiveMode}
+              />
+              <div className="terminal text-[9px] text-cyan-glow/45 mt-1">
+                Enables integrity meter, anomaly alerts, and contract panel. Off by default.
+              </div>
+            </div>
+            <div className="border-t border-cyan-neon/15" />
+            {/* Interface — live design tokens */}
+            <div className="space-y-2.5">
+              <div className="terminal text-[10px] neon-text-cyan">// INTERFACE</div>
+              <div className="terminal text-[9px] text-cyan-glow/45">
+                UI accent recolors panels and HUD — not voxel blocks. Block types are chosen in Block Matrix.
+              </div>
+              <div>
+                <div className="terminal text-[10px] text-cyan-glow/60 mb-1">ACCENT</div>
+                <div className="flex gap-1.5">
+                  {ACCENTS.map(({ hex, name }) => {
+                    const active = theme.accent.toLowerCase() === hex.toLowerCase();
+                    return (
+                      <button
+                        key={hex}
+                        title={`${name} — ${hex}`}
+                        onClick={() => setTheme({ accent: hex })}
+                        className="flex-1 h-7 transition-transform hover:scale-105"
+                        style={{
+                          background: hex,
+                          border: `${active ? 2 : 1}px solid ${active ? '#ffffff' : 'rgba(255,255,255,0.2)'}`,
+                          boxShadow: active ? `0 0 12px ${hex}` : 'none',
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <div className="terminal text-[10px] text-cyan-glow/60 mb-1">CHROME</div>
+                  <div className="grid grid-cols-2 gap-1">
+                    {(['minimal', 'full'] as const).map((m) => (
+                      <button
+                        key={m}
+                        className="btn-neon !text-[10px]"
+                        data-active={theme.chrome === m}
+                        onClick={() => setTheme({ chrome: m })}
+                        title={m === 'minimal' ? 'Fainter panel borders.' : 'Full-strength borders.'}
+                      >
+                        {m.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div className="terminal text-[10px] text-cyan-glow/60 mb-1">DENSITY</div>
+                  <div className="grid grid-cols-2 gap-1">
+                    {(['compact', 'regular'] as const).map((m) => (
+                      <button
+                        key={m}
+                        className="btn-neon !text-[10px]"
+                        data-active={theme.density === m}
+                        onClick={() => setTheme({ density: m })}
+                        title={m === 'compact' ? 'Tighter padding + row height.' : 'Default spacing.'}
+                      >
+                        {m.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <Toggle
+                label="HIGH CONTRAST"
+                value={theme.contrast === 'high'}
+                onChange={(v) => setTheme({ contrast: v ? 'high' : 'normal' })}
+              />
+              <div className="terminal text-[9px] text-cyan-glow/45">
+                Opaque panels, brighter text, borders, no scanlines. For low-vision / glare.
+              </div>
+            </div>
+            <div className="border-t border-cyan-neon/15" />
             {/* Quality preset */}
             <div>
               <div className="terminal text-[10px] text-cyan-glow/60 mb-1">QUALITY PRESET</div>

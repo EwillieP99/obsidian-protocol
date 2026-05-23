@@ -7,7 +7,7 @@
 
 **Constraint source of truth:** [docs/how-to-extend.md](how-to-extend.md) — read before every ticket.
 
-**V2 engine status:** Phases 0–4 committed and perf-validated (2026-05-20, Blackspire ~3,100 cells — paint/undo smooth). Phase 5 OBS2 persistence is built in the working tree (staged engine bits + unstaged `lib/persistence.ts`). Phase overview and file map: [docs/wiki.md](wiki.md).
+**V2 engine status:** Phases 0–5 complete and perf-validated (2026-05-20). Wave A product features (Studio/Immersive, Artifact Library, toolbar groups) in working tree — pending commit.
 
 ---
 
@@ -83,28 +83,28 @@ Each ticket moves through explicit states. Humans review before merge.
 
 ## Current reality check
 
-**Branch:** `master` at `d3acd98` (or later) — **9 commits ahead** of `origin/master`, **never pushed**.
+**Branch:** `master` — Wave A landing in chunked commits; pushed to `origin/master` (May 2026).
 
 | Area | Key files / symbols | Git state |
 |------|---------------------|-----------|
-| Phase 5 OBS2 engine | `engine/worker/voxel.worker.ts` (`handleSerialize`), `engine/bridge/WorkerProtocol.ts`, `engine/core/VoxelEngine.ts`, `types/engine.ts` (`IVoxelEngine.serialize(name?, thumbnail?)`) | **Staged** (4 files) |
-| Phase 5 binary I/O | `lib/persistence.ts` — ArrayBuffer writes, lazy JSON→OBS2 migration | Modified **unstaged** |
-| Studio vs Immersive | `stores/uiStore.ts` `immersiveMode`; gated in `AnomalyAlert.tsx`, `IntegrityMeter.tsx`, `SettingsPanel.tsx`, `Toolbar.tsx` | Modified **unstaged** |
-| Artifact Library | `lib/artifacts.ts`, `lib/artifacts/prefabs.ts`, `ArtifactLibraryPanel.tsx`, `scripts/extract-prefabs.mjs`; `Interaction.tsx`, `useKeyboardShortcuts.ts`, `uiStore` (`selectionStart/End`, `clipboard`, `stampArtifact`) | **Untracked** + unstaged wiring |
-| Toolbar groups | `toolbarGroups`, `toggleToolbarGroup` in `uiStore` → `Toolbar.tsx` | Modified **unstaged** |
-| LayerPanel swatches | `useLayerDominantBlocks()` in `hooks/useEngine.ts` → `LayerPanel.tsx` | Modified **unstaged** |
-| Docs shuffle | `docs/wiki.md` (new); `docs/README (1).md` deleted; partial rewrites of `features.md`, `how-to-extend.md`, `technical-architecture.md` | Mixed staged/unstaged/untracked |
-| This plan | `docs/PROJECT_PLAN.md` | Being replaced (v2) |
+| Phase 5 OBS2 engine | `engine/worker/voxel.worker.ts` (`handleSerialize`), `engine/bridge/WorkerProtocol.ts`, `engine/core/VoxelEngine.ts`, `types/engine.ts` (`IVoxelEngine.serialize(name?, thumbnail?)`) | **Uncommitted** — A1 |
+| Phase 5 binary I/O | `lib/persistence.ts` — ArrayBuffer writes, lazy JSON→OBS2 migration | **Uncommitted** — A1 |
+| Studio vs Immersive | `stores/uiStore.ts` `immersiveMode`; gated in `AnomalyAlert.tsx`, `IntegrityMeter.tsx`, `SettingsPanel.tsx`, `Toolbar.tsx` | **Uncommitted** — A2 |
+| Artifact Library | `lib/artifacts.ts`, `lib/artifacts/prefabs.ts`, `ArtifactLibraryPanel.tsx`, `scripts/extract-prefabs.mjs`; select + clipboard/stamp wiring | **Uncommitted** — A4 |
+| Toolbar groups | `toolbarGroups`, `toggleToolbarGroup` in `uiStore` → `Toolbar.tsx` | **Uncommitted** — A3 |
+| LayerPanel swatches | `useLayerDominantBlocks()` in `hooks/useEngine.ts` → `LayerPanel.tsx` | **Uncommitted** — A3 |
+| Docs sync | `docs/wiki.md`, `features.md`, `how-to-extend.md`, `technical-architecture.md`, `shaders.md`, `voxel-engine.md`, `README.md` | **Uncommitted** — A5 |
+| This plan | `docs/PROJECT_PLAN.md` | ✅ Committed (Master Plan v2) |
 
 ### Known gaps (honest; not blockers for planning)
 
 | Gap | Notes | Ticket |
 |-----|-------|--------|
-| Toolbar export tooltip | Still says "Export snapshot" — should be "Export vault" / "Import vault" | A1 |
+| Toolbar export tooltip | Fixed in A1 — "Export vault" / "Import vault" | ✅ |
 | `AUTOSAVE_KEY_V2` / `SAVE_DB_KEY_V2` | In `lib/constants.ts` but unused — same idb keys, binary payloads | A1 (document or wire) |
 | `ContractPanel` not immersive-gated | Only Toolbar contract button respects `immersiveMode` | A2 optional follow-up |
 | Stale docs | `docs/shaders.md`, `docs/voxel-engine.md`, root `README.md` | A5 |
-| No automated tests | Zero Vitest files | B6 |
+| No automated tests | Partial — OBS2 + worker round-trip + pure-lib Vitest tests (B6 ongoing) | B6 |
 | Raycast worker unused for input | `Interaction.tsx` uses R3F — by design until profiled | Out of scope |
 
 ---

@@ -83,7 +83,6 @@ export type MainToVoxelMsg =
       seedCells?: WireOp[]; // initial cells to populate (V1 import path)
       contract: import('@/types').Contract | null;
       raycastPort?: MessagePort; // Phase 4 wire-up
-      compressPort?: MessagePort; // Phase 5 wire-up
       statsTickMs: number;
     }
   | { type: 'APPLY_OPS'; ops: WireOp[]; label: string; requestId?: number }
@@ -202,7 +201,7 @@ export type RaycastToVoxelMsg = never;
 // ---------------------------------------------------------------------------
 
 export type MainToCompressMsg =
-  | { type: 'INIT'; voxelPort: MessagePort }
+  | { type: 'INIT' }
   | {
       type: 'ENCODE';
       requestId: number;

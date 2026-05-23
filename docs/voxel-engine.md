@@ -2,16 +2,10 @@
 
 The voxel engine is the technical heart of Obsidian Protocol. V2 is a from-scratch rebuild that moves all voxel state off the main thread. V1 is fully retired as of Phase 3.5.
 
-> **Status — 2026-05-13**
+> **Status — 2026-05-21**
 >
-> - ✅ **Phases 0–2** (`5f215f9`): engine scaffolding, worker stand-up, chunk model, `RenderBridge` built, worker re-INIT path wired
-> - ✅ **Phase 3.1** (`2d42765`): `RenderBridge` instantiated; worker seeds from store on INIT
-> - ✅ **Phase 3.3** (`2322016`): `Voxels.tsx` rewritten as RenderBridge thin wrapper — no more `useEffect([revision])` full-rebuild
-> - ✅ **Phase 3.4** (`2322016`): All mutation sites now call `engine.*`
-> - ✅ **Phase 3.2**: Mutations post to worker directly; `PATCH/STATS/CHRONO/LAYERS` replies drive the event bus; `storeUnsub` retired
-> - ✅ **Phase 3.5**: `voxelStore` deleted — all UI reads go through engine hooks (`useEngineStats`, `useEngineLayers`, `useEngineChrono`, `useEngineContract`, `useLayerCounts`)
-> - ✅ **Phase 4**: `raycast.worker.ts` stood up; `engine.raycast()` answers via Amanatides–Woo DDA against a `Uint8Array(WORLD_SIZE² × WORLD_Y_ROUNDED)` blockIndex grid. voxel.worker pushes `OCCUPANCY_DELTA` pairs over a dedicated `MessageChannel` after every mutation (and a snapshot at INIT). UI still uses R3F raycasting for pointer events; `engine.raycast()` is now available for non-pointer queries (gameplay logic, AI agents, etc.).
-> - ⏳ **Phase 5**: OBS2 binary serialization via compress.worker; retire V1 JSON `serialize()` path
+> - ✅ **Phases 0–4** — worker engine, RenderBridge, voxelStore retired, raycast worker
+> - ✅ **Phase 5** — OBS2 binary serialization via `compress.worker`; `lib/persistence.ts` user I/O complete
 >
 > See [V1 Autopsy](v1_autopsy.md) for the original problem statement.
 
@@ -68,7 +62,7 @@ interface IVoxelEngine {
   getBlock(x: number, y: number, z: number): BlockId | undefined;
 
   // Async I/O
-  serialize(): Promise<ArrayBuffer>;
+  serialize(name?: string, thumbnail?: string): Promise<ArrayBuffer>;
   raycast(origin, direction): Promise<RaycastResult | null>;
 
   // Bulk read (initial bridge seed)
@@ -170,8 +164,10 @@ Large payloads (occupancy deltas for Phase 4 raycast worker, OBS2 buffers for Ph
 | `engine/chunks/Chunk.ts` | Uint16Array[4096] chunk + pack/unpack helpers |
 | `engine/core/VoxelEngine.ts` | Main-thread singleton; spawns workers; opens voxel↔raycast `MessageChannel`; event emitter; main-thread caches (localCells, layersCache, statsCache, …) |
 | `engine/worker/voxel.worker.ts` | Canonical state; APPLY_OPS / UNDO / REDO / etc. handlers; pushes `OCCUPANCY_DELTA` over the raycast port on every mutation |
+| `engine/worker/compress.worker.ts` | OBS2 encode/decode RPC (`ENCODE` / `DECODE`) |
+| `engine/persist/obs2.ts` | OBS2 binary codec (RLE chunk payloads, magic header) |
 | `engine/worker/raycast.worker.ts` | `Uint8Array(worldX·worldY·worldZ)` blockIndex grid kept in sync via `OCCUPANCY_DELTA`; answers `RAY_QUERY` with Amanatides–Woo DDA |
-| `hooks/useEngine.ts` | `useEngine()`, `getEngine()`, and reactive hooks: `useEngineStats`, `useEngineLayers`, `useEngineChrono`, `useEngineContract`, `useLayerCounts` |
+| `hooks/useEngine.ts` | `useEngine()`, `getEngine()`, and reactive hooks: `useEngineStats`, `useEngineLayers`, `useEngineChrono`, `useEngineContract`, `useLayerCounts`, `useLayerDominantBlocks` |
 | `lib/blocks.ts` | `BLOCK_TYPES`, `BLOCK_ORDER`, **append-only** `BLOCK_INDEX_TABLE` |
 
 ---
@@ -198,7 +194,7 @@ V1 was a 1-hour Claude Code build. Its design choices that V2 **preserved**:
 
 - **One `InstancedMesh` per BlockId** (12 total) — V2 keeps this geometry but moves slot management into `SlotAllocator`.
 - **Per-cell opacity via `instanceColor` grayscale** — V2 keeps this trick (no alpha blending state changes); the bake re-runs from `RenderBridge.setLayers()`.
-- **Shared `uTime` uniform** across all shader materials — V2 preserves the `SharedShaderClock` pattern.
+- **Shared `uTime` uniform** across all shader materials — updated once per frame in `components/scene/Voxels.tsx` (module-level `sharedUniforms`).
 - **Custom `boundingSphere`** on geometry for world-spanning frustum culling — V2 reuses the same trick.
 
 What V2 **changed**:
