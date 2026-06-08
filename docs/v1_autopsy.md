@@ -1,5 +1,7 @@
 # V1 Autopsy – Obsidian Protocol (May 2026)
 
+> **Update (2026-05-22):** V2 Phases 0–5 and Wave A/B are complete. The P0 main-thread hitch issue is resolved via the worker-backed engine and `RenderBridge`. The palette has since expanded from 12 to **16 block types** (append-only `BLOCK_INDEX_TABLE`).
+
 ## Executive Summary
 V1 is shockingly polished for a 1-hour Claude build. The cyberpunk aesthetic, shaders, audio, and core interaction loop are elite. The fantasy of being a “Lead Neural Architect” is already there.
 

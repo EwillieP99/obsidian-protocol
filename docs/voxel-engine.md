@@ -2,10 +2,12 @@
 
 The voxel engine is the technical heart of Obsidian Protocol. V2 is a from-scratch rebuild that moves all voxel state off the main thread. V1 is fully retired as of Phase 3.5.
 
-> **Status — 2026-05-21**
+> **Status — 2026-05-22**
 >
-> - ✅ **Phases 0–4** — worker engine, RenderBridge, voxelStore retired, raycast worker
-> - ✅ **Phase 5** — OBS2 binary serialization via `compress.worker`; `lib/persistence.ts` user I/O complete
+> - ✅ **Phases 0–5** — worker engine, RenderBridge, voxelStore retired, raycast worker, OBS2 persistence
+> - ✅ **Wave A** — Studio/Immersive, Artifact Library, toolbar groups, layer swatches
+> - ✅ **Wave B** — stamp transform + ghost, selection box/HUD, 18 prefabs, glTF export, Vitest (19 tests)
+> - ⏸ **B5 greedy meshing** — descoped; instanced rendering remains default
 >
 > See [V1 Autopsy](v1_autopsy.md) for the original problem statement.
 
@@ -23,7 +25,7 @@ The V2 engine is three layers connected by a typed message protocol:
 │   RenderBridge ◄── 'patch' event ◄── VoxelEngine ◄───────┼──│  chunks Map      │
 │         │                                                │  │  chronoLog       │
 │         ▼                                                │  │  future stack    │
-│   InstancedMesh × 12 (pre-allocated MAX_INSTANCES)       │  │  layers          │
+│   InstancedMesh × 16 (pre-allocated MAX_INSTANCES)       │  │  layers          │
 │                                                          │  │  stats counters  │
 │   UI hooks ◄── 'stats'/'layers'/'chrono'/'contract' ◄────┼──│                  │
 │   (useEngineStats, useEngineLayers, …)                   │  │                  │
@@ -92,6 +94,7 @@ Engine events: `'patch' | 'stats' | 'chrono' | 'layers' | 'contract' | 'ready' |
 | `useEngineChrono()` | `'chrono'` | `{ entries: ChronoEntry[], futureEntries: ChronoEntry[] }` |
 | `useEngineContract()` | `'contract'` | `Contract \| null` |
 | `useLayerCounts()` | `'patch'` | `Map<layerId, count>` (incremental) |
+| `useLayerDominantBlocks()` | `'patch'` | Dominant block color per layer (Wave A) |
 
 These hooks replace what was previously scattered across `useVoxelStore(...)` selectors in every UI component.
 
@@ -135,7 +138,7 @@ Chunks live in a sparse `Map<chunkKey, Chunk>` inside the worker. Empty chunks a
 
 `engine/bridge/RenderBridge.ts` is the GPU patcher. Eliminates V1's `useEffect([cells, revision, layerRevision])` full-rebuild thrash. Key pieces:
 
-- **Pre-allocated meshes.** 12 `InstancedMesh` at `MAX_INSTANCES=16384` each. Never grows mid-session.
+- **Pre-allocated meshes.** 16 `InstancedMesh` at `MAX_INSTANCES=16384` each (one per non-air block type). Never grows mid-session.
 - **`SlotAllocator`.** Per-mesh `Map<cellIdx, slot>` + `freeList: number[]`. `alloc()` pops the free list or increments `nextSlot`; `free()` pushes to the free list. Both O(1). `mesh.count = nextSlot` (high-water mark) — freed slots within range stay invisible via `ZERO_MATRIX`.
 - **Frame-coalesced flushes.** `queueDeltas()` buffers worker output; `flushPending()` runs from `useFrame` and drains the buffer in one pass. Only meshes touched this frame call `instanceMatrix.needsUpdate = true`.
 - **Per-layer re-bake.** Local `cellMeta: Map<cellIdx, CellRecord>` and `layerCells: Map<layerId, Set<cellIdx>>`. When `setLayers()` detects visibility/opacity/solo changes, only the affected layers' cells are re-baked. Cost: O(cells in changed layers), not O(all cells).
@@ -160,7 +163,7 @@ Large payloads (occupancy deltas for Phase 4 raycast worker, OBS2 buffers for Ph
 |---|---|
 | `types/engine.ts` | `IVoxelEngine` API surface + `CellOp`, `CellDelta`, `EngineEvent`, `ChronoEntry`, … |
 | `engine/bridge/WorkerProtocol.ts` | Discriminated unions for every worker message |
-| `engine/bridge/RenderBridge.ts` | `SlotAllocator` + 12 InstancedMesh + frame-coalesced flush |
+| `engine/bridge/RenderBridge.ts` | `SlotAllocator` + 16 InstancedMesh + frame-coalesced flush |
 | `engine/chunks/Chunk.ts` | Uint16Array[4096] chunk + pack/unpack helpers |
 | `engine/core/VoxelEngine.ts` | Main-thread singleton; spawns workers; opens voxel↔raycast `MessageChannel`; event emitter; main-thread caches (localCells, layersCache, statsCache, …) |
 | `engine/worker/voxel.worker.ts` | Canonical state; APPLY_OPS / UNDO / REDO / etc. handlers; pushes `OCCUPANCY_DELTA` over the raycast port on every mutation |
@@ -168,7 +171,10 @@ Large payloads (occupancy deltas for Phase 4 raycast worker, OBS2 buffers for Ph
 | `engine/persist/obs2.ts` | OBS2 binary codec (RLE chunk payloads, magic header) |
 | `engine/worker/raycast.worker.ts` | `Uint8Array(worldX·worldY·worldZ)` blockIndex grid kept in sync via `OCCUPANCY_DELTA`; answers `RAY_QUERY` with Amanatides–Woo DDA |
 | `hooks/useEngine.ts` | `useEngine()`, `getEngine()`, and reactive hooks: `useEngineStats`, `useEngineLayers`, `useEngineChrono`, `useEngineContract`, `useLayerCounts`, `useLayerDominantBlocks` |
-| `lib/blocks.ts` | `BLOCK_TYPES`, `BLOCK_ORDER`, **append-only** `BLOCK_INDEX_TABLE` |
+| `lib/artifacts/transform.ts` | Stamp rotate/mirror transform for prefab placement (Wave B1) |
+| `lib/exporters/gltf.ts` | Read-only glTF/GLB vault export (Wave B4) |
+| `lib/selection.ts` | Selection AABB helpers for copy/paste UI (Wave B2) |
+| `lib/blocks.ts` | `BLOCK_TYPES`, `BLOCK_ORDER`, **append-only** `BLOCK_INDEX_TABLE` (16 block types) |
 
 ---
 
@@ -192,7 +198,7 @@ The architectural rationale: brush expansion + history update + integrity comput
 
 V1 was a 1-hour Claude Code build. Its design choices that V2 **preserved**:
 
-- **One `InstancedMesh` per BlockId** (12 total) — V2 keeps this geometry but moves slot management into `SlotAllocator`.
+- **One `InstancedMesh` per BlockId** (16 total) — V2 keeps this geometry but moves slot management into `SlotAllocator`.
 - **Per-cell opacity via `instanceColor` grayscale** — V2 keeps this trick (no alpha blending state changes); the bake re-runs from `RenderBridge.setLayers()`.
 - **Shared `uTime` uniform** across all shader materials — updated once per frame in `components/scene/Voxels.tsx` (module-level `sharedUniforms`).
 - **Custom `boundingSphere`** on geometry for world-spanning frustum culling — V2 reuses the same trick.
@@ -223,4 +229,4 @@ What V2 **changed**:
 
 ---
 
-*Last updated: 2026-05-13. Phase 4 complete.*
+*Last updated: 2026-05-22. Phases 0–5 + Wave A/B complete (B5 greedy meshing descoped).*

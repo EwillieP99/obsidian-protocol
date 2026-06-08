@@ -25,9 +25,9 @@ production-quality cyberpunk creative tool.
   - `Glitch Zone` with a **chromatic-break / jitter shader**
   - `Circuit Plate` with a **PCB trace flow shader**
 - **Brush system**: Paint, Purge (erase), Fill, Rewrite (replace), Sample (eyedropper), **Select** (region copy/paste).
-  Brush size (XZ radius on active layer), shape (rectangle / circle), and randomness sliders.
-  Live 3D **brush preview** with shape-aware envelope and face-normal indicator.
-- **Artifact Library**: prefab stamps, region select, Ctrl+C/V copy/paste, save selections to library (panel **A**).
+  **Freehand** and **Line** strokes; rectangle / circle shapes; size (XZ radius on active layer) and randomness sliders.
+  Live 3D **brush preview** with shape-aware envelope, line-stroke path preview, and face-normal indicator.
+- **Artifact Library**: 18 prefab stamps with rotate/mirror ghost preview, region select + 3D selection box, Ctrl+C/V copy/paste, glTF export, save selections to library (panel **A**).
 - **12 vertical layers** with per-layer visibility, lock, solo modes, **drag-to-reorder
   display**, **per-layer opacity sliders**, dominant-block swatches, and live block counts.
 - **Undo / redo** with a full chrono-log timeline UI — click any entry to time-travel.
@@ -79,13 +79,15 @@ This release is a polish + perf pass on top of the original prototype. Highlight
 
   At ~6000 voxels, the HIGH preset still holds 60 fps; BALANCED stays > 100.
 
-### Roadmap (scaffolded, not yet wired)
+### Roadmap (not yet wired)
 - 🔌 **Liveblocks real-time collaboration** (multi-architect editing, live cursors)
 - 🥽 **WebXR / "Enter Neural Link"** mode
 - ⚡ **WebGPU renderer** path (currently UI-toggleable; falls back to WebGL2)
 - 🤖 **ECS-driven background drones** that patrol the structure (currently spritesheet only)
-- 📦 **glTF export** of the entire scene
-- 🧠 **Greedy meshing** for large structures
+- 🧠 **Greedy meshing** for large structures (B5 spike descoped — instancing remains default)
+- 🧠 **In-product AI agents** (Spike C research memo pending)
+
+**Recently shipped:** glTF export (Toolbar IO), selection box + HUD, stamp rotate/mirror, 18 prefabs, Vitest + Playwright CI, HUD reskin.
 
 ---
 
@@ -110,7 +112,8 @@ npm install
 npm run dev          # dev server on http://localhost:3000
 npm run build        # production build
 npm run typecheck    # tsc --noEmit
-npm test             # Vitest smoke tests (OBS2 + worker protocol)
+npm test             # Vitest (19 tests: OBS2, worker protocol, brush, selection, …)
+npm run test:e2e     # Playwright smoke (boot + example load)
 ```
 
 ---
@@ -147,6 +150,9 @@ Press `?` or `/` in-app for a styled overlay of every binding.
 | `X`                 | Select mode (region copy/paste)                 |
 | `A`                 | Toggle Artifact Library panel                   |
 | `Ctrl/⌘ + C/V`      | Copy / paste selection                          |
+| `R` (stamp mode)    | Rotate stamp 90°                                |
+| `M` (stamp mode)    | Mirror stamp on X axis                          |
+| `Esc`               | Cancel stamp mode / clear selection             |
 | `[` / `]`           | Decrease / increase brush size                  |
 | `1` / `2` / `3`     | Camera: Architect / Street / Neural Dive        |
 | `C`                 | Toggle cinematic auto-rotate                    |
@@ -241,9 +247,10 @@ If you are building > 5000 voxels, consider:
 ```
 app/                 # Next.js App Router pages + globals.css
 components/
-  scene/             # R3F scene: Scene, Voxels, Cursor, Interaction, CameraRig,
+  scene/             # R3F scene: Scene, Voxels, Cursor, Interaction, SelectionBox,
                      # PostFX, SceneEffects (particles + shake + flash), FpsTracker
   ui/                # HUD: BootSequence, Toolbar, BlockPalette, LayerPanel,
+                     # ArtifactLibraryPanel, SelectionHud, CanvasHud, FirstRunHints,
                      # ShortcutsOverlay, LoadingVeil, HudStream, …
 engine/              # V2 voxel engine (worker-backed canonical state):
   core/              #   VoxelEngine — IVoxelEngine impl, main-thread orchestrator
@@ -252,13 +259,15 @@ engine/              # V2 voxel engine (worker-backed canonical state):
   chunks/            #   Chunk — 16³ bit-packed uint16 cells
   persist/           #   obs2.ts — binary save codec
 hooks/               # useKeyboardShortcuts, useEffectBindings, useEngine* reads
-lib/                 # blocks, brush, contracts, persistence, artifacts, audio, …
+lib/                 # blocks, brush, contracts, persistence, artifacts, exporters/gltf, …
 shaders/             # GLSL fragment/vertex strings for shader-driven blocks
 stores/              # Zustand: uiStore, effectsStore (UI/effects only — voxel state
                      # lives in engine/ since Phase 3.5; voxelStore was deleted)
 types/               # All shared TypeScript types
 public/examples/     # Pre-built demo saves
-scripts/             # build-examples.mjs
+scripts/             # build-examples.mjs, extract-prefabs.mjs
+e2e/                 # Playwright smoke tests
+.github/workflows/   # CI: typecheck, lint, test, build
 ```
 
 ---

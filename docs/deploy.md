@@ -27,12 +27,14 @@ Configuration lives in [`vercel.json`](../vercel.json) (`framework: nextjs`, `bu
 
 ## CI
 
-GitHub Actions runs on push/PR to `master` or `main`:
+GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `master` or `main`:
 
 - `npm run typecheck`
 - `npm run lint`
-- `npm test`
+- `npm test` (19 Vitest tests)
 - `npm run build`
+
+Optional local E2E: `npm run test:e2e` (Playwright — boot shell + example load smoke).
 
 ## Manual demo smoke (before sharing URL)
 
@@ -41,6 +43,8 @@ GitHub Actions runs on push/PR to `master` or `main`:
 3. Open Artifact Library → stamp a prefab
 4. Named save → refresh → vault intact
 5. Export vault → import round-trip
+6. Export glTF → open in external viewer
+7. Select region → verify selection box + HUD → stamp prefab with R/M transform
 
 ## E2E (optional)
 

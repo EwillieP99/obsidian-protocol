@@ -1,13 +1,13 @@
 # Obsidian Protocol — Master Plan v2 (Agent-Orchestrated)
 
-**Saved:** 2026-05-21  
+**Saved:** 2026-05-22  
 **Purpose:** Wave-based execution plan for agents and humans. Each ticket is self-contained with file touch-lists, hard constraints, and verification gates.
 
-**North star:** Creative tool depth first — Studio mode (immersive HUD optional) and Artifact Library as the product differentiator. V2 engine work is supporting infrastructure (already largely complete). In-product AI agents are **research only** (Spike C); no agent code until a future Wave E.
+**North star:** Creative tool depth first — Studio mode (immersive HUD optional) and Artifact Library as the product differentiator. V2 engine work is supporting infrastructure (**complete**). In-product AI agents are **research only** (Spike C); no agent code until a future Wave E.
 
 **Constraint source of truth:** [docs/how-to-extend.md](how-to-extend.md) — read before every ticket.
 
-**V2 engine status:** Phases 0–5 complete and perf-validated (2026-05-20). Wave A product features (Studio/Immersive, Artifact Library, toolbar groups) in working tree — pending commit.
+**Current snapshot (2026-05-22):** Commit `3f95ec0` on `master` — V2 Phases 0–5, Wave A, most of Wave B, partial Wave D, HUD reskin, CI, Vitest (19 tests), Playwright smoke E2E. **Not done:** B5 greedy meshing (descoped), Spike C memo, production Vercel URL in docs.
 
 ---
 
@@ -83,29 +83,35 @@ Each ticket moves through explicit states. Humans review before merge.
 
 ## Current reality check
 
-**Branch:** `master` — Wave A landing in chunked commits; pushed to `origin/master` (May 2026).
+**Branch:** `master` @ `3f95ec0` — pushed to `origin/master` (May 2026).
 
-| Area | Key files / symbols | Git state |
-|------|---------------------|-----------|
-| Phase 5 OBS2 engine | `engine/worker/voxel.worker.ts` (`handleSerialize`), `engine/bridge/WorkerProtocol.ts`, `engine/core/VoxelEngine.ts`, `types/engine.ts` (`IVoxelEngine.serialize(name?, thumbnail?)`) | **Uncommitted** — A1 |
-| Phase 5 binary I/O | `lib/persistence.ts` — ArrayBuffer writes, lazy JSON→OBS2 migration | **Uncommitted** — A1 |
-| Studio vs Immersive | `stores/uiStore.ts` `immersiveMode`; gated in `AnomalyAlert.tsx`, `IntegrityMeter.tsx`, `SettingsPanel.tsx`, `Toolbar.tsx` | **Uncommitted** — A2 |
-| Artifact Library | `lib/artifacts.ts`, `lib/artifacts/prefabs.ts`, `ArtifactLibraryPanel.tsx`, `scripts/extract-prefabs.mjs`; select + clipboard/stamp wiring | **Uncommitted** — A4 |
-| Toolbar groups | `toolbarGroups`, `toggleToolbarGroup` in `uiStore` → `Toolbar.tsx` | **Uncommitted** — A3 |
-| LayerPanel swatches | `useLayerDominantBlocks()` in `hooks/useEngine.ts` → `LayerPanel.tsx` | **Uncommitted** — A3 |
-| Docs sync | `docs/wiki.md`, `features.md`, `how-to-extend.md`, `technical-architecture.md`, `shaders.md`, `voxel-engine.md`, `README.md` | **Uncommitted** — A5 |
-| This plan | `docs/PROJECT_PLAN.md` | ✅ Committed (Master Plan v2) |
+| Area | Key files / symbols | Status |
+|------|---------------------|--------|
+| V2 Phases 0–5 | `engine/`, `hooks/useEngine.ts`, `lib/persistence.ts` | ✅ Committed |
+| Wave A — OBS2 I/O, Studio/Immersive, toolbar groups, Artifact Library | `lib/persistence.ts`, `ArtifactLibraryPanel.tsx`, `uiStore.immersiveMode` | ✅ A1–A4 |
+| Wave A — CI | `.github/workflows/ci.yml` | ✅ A6 |
+| Wave B — stamp rotate/mirror + ghost | `lib/artifacts/transform.ts`, `Cursor.tsx`, `useKeyboardShortcuts.ts` | ✅ B1 |
+| Wave B — selection box + HUD | `SelectionBox.tsx`, `SelectionHud.tsx` | ✅ B2 |
+| Wave B — prefab pack (18 shipped) | `lib/artifacts/prefabs.ts`, `scripts/extract-prefabs.mjs` | ✅ B3 |
+| Wave B — glTF export | `lib/exporters/gltf.ts`, Toolbar IO group | ✅ B4 |
+| Wave B — greedy meshing spike | — | ⏸ Descoped (B5 not implemented) |
+| Wave B — Vitest + Playwright | 8 test files (19 Vitest), `e2e/smoke.spec.ts` | ✅ B6 |
+| Wave D — partial polish | `FirstRunHints.tsx`, `CanvasHud.tsx`, `StatusBar.tsx`, HUD reskin (`globals.css`) | ✅ Partial D1/D3 |
+| Wave D — Vercel deploy URL | `vercel.json`, `docs/deploy.md` | ⏳ D2 — config ready; no pinned prod URL in repo |
+| Spike C — agent research memo | `docs/agents-research.md` | ⏳ C1 not written |
+| Brush depth — line stroke, smart connect | `lib/brush.ts`, `Interaction.tsx`, `types/index.ts` | ✅ Shipped with Wave B commit |
+| Settings presets + persistence | `lib/settingsPresets.ts`, `lib/settingsPersistence.ts` | ✅ Shipped with reskin |
 
 ### Known gaps (honest; not blockers for planning)
 
 | Gap | Notes | Ticket |
 |-----|-------|--------|
-| Toolbar export tooltip | Fixed in A1 — "Export vault" / "Import vault" | ✅ |
-| `AUTOSAVE_KEY_V2` / `SAVE_DB_KEY_V2` | In `lib/constants.ts` but unused — same idb keys, binary payloads | A1 (document or wire) |
+| `AUTOSAVE_KEY_V2` / `SAVE_DB_KEY_V2` | Deprecated aliases in `lib/constants.ts` — persistence uses v1 idb keys with OBS2 payloads | Documented in constants |
 | `ContractPanel` not immersive-gated | Only Toolbar contract button respects `immersiveMode` | A2 optional follow-up |
-| Stale docs | `docs/shaders.md`, `docs/voxel-engine.md`, root `README.md` | A5 |
-| No automated tests | Partial — OBS2 + worker round-trip + pure-lib Vitest tests (B6 ongoing) | B6 |
+| Greedy meshing | No `uiStore.quality.greedyMesh` flag — B5 descoped after Wave B landing | Future spike |
 | Raycast worker unused for input | `Interaction.tsx` uses R3F — by design until profiled | Out of scope |
+| Agent integration | No `docs/agents-research.md` yet | C1 |
+| Production deploy URL | Vercel config present; preview/prod URL not checked into docs | D2 |
 
 ---
 
@@ -125,18 +131,20 @@ flowchart TB
   SpikeC -.->|informs future Wave E| WaveD
 ```
 
-| Wave | Goal | Parallel? | Commits |
-|------|------|-----------|---------|
-| **A** | Clean tree, push to origin, docs match code | No — sequential A1→A6 | One per ticket |
-| **B** | Artifact Library + Studio depth | Yes — B1–B6 in worktrees | One per ticket |
-| **C** | AI agent research memo only | No code | N/A (doc only) |
-| **D** | Demo / deploy / polish | After B | One per ticket |
+| Wave | Goal | Parallel? | Status |
+|------|------|-----------|--------|
+| **A** | Clean tree, push to origin, docs match code | No — sequential A1→A6 | ✅ Complete (`3f95ec0`) |
+| **B** | Artifact Library + Studio depth | Yes — B1–B6 in worktrees | ✅ B1–B4, B6 done; B5 descoped |
+| **C** | AI agent research memo only | No code | ⏳ C1 pending |
+| **D** | Demo / deploy / polish | After B | 🔶 Partial — HUD/onboarding polish landed; D2 URL TBD |
 
 ---
 
-## Wave A — Reconcile and ship
+## Wave A — Reconcile and ship ✅
 
 **Goal:** Working tree reconciled into reviewable commits, documentation accurate, branch pushed to `origin/master`.
+
+**Status:** Landed in commit `3f95ec0` (single consolidated commit with Wave B + reskin).
 
 **Rules:** Run **A1 → A6 in order**. One ticket = one commit. Do not parallelize — overlapping file conflicts (especially `uiStore`, `Toolbar`, `Interaction`).
 
@@ -320,9 +328,11 @@ flowchart TB
 
 ---
 
-## Wave B — Creative tool depth
+## Wave B — Creative tool depth ✅ (except B5)
 
 **Goal:** Make Studio mode and Artifact Library genuinely useful for creative workflows.
+
+**Status:** B1–B4 and B6 shipped in `3f95ec0`. **B5 greedy meshing** was not implemented — instanced rendering remains canonical.
 
 **Rules:** Tickets **B1–B6** may run in **parallel worktrees** (`best-of-n-runner`). Merge in order **B1 → B6** to reduce conflict risk. Each ticket = one commit.
 
@@ -525,9 +535,9 @@ flowchart TB
 
 ---
 
-## Wave D — Demo + portfolio polish
+## Wave D — Demo + portfolio polish 🔶
 
-**Blocked on Wave B completion.** Do not start until B1–B6 are merged or explicitly descoped.
+**Wave B prerequisite met** (B5 explicitly descoped). Partial polish landed in `3f95ec0`; D2 production URL still open.
 
 ---
 
@@ -628,10 +638,11 @@ Defer unless a dedicated future ticket explicitly requests them:
 | [docs/wiki.md](wiki.md) | Wiki index + V2 phase overview |
 | [docs/v1_autopsy.md](v1_autopsy.md) | Why V2 exists (main-thread hitches) |
 | [docs/technical-architecture.md](technical-architecture.md) | Stack, workers, file map |
-| [docs/voxel-engine.md](voxel-engine.md) | Worker, chunks, RenderBridge (sync in A5) |
+| [docs/voxel-engine.md](voxel-engine.md) | Worker, chunks, RenderBridge |
 | [docs/how-to-extend.md](how-to-extend.md) | Agent playbook + hard constraints |
 | [docs/features.md](features.md) | Product features + brush system |
-| [docs/shaders.md](shaders.md) | GLSL blocks (sync in A5) |
+| [docs/shaders.md](shaders.md) | GLSL blocks |
+| [docs/deploy.md](deploy.md) | Vercel deploy + CI |
 | [docs/agents-research.md](agents-research.md) | Spike C deliverable (C1 — not yet written) |
 | [README.md](../README.md) | User-facing setup + features |
 

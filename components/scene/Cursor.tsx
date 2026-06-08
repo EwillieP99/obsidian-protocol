@@ -6,7 +6,7 @@ import { useFrame } from '@react-three/fiber';
 import { useUIStore } from '@/stores/uiStore';
 import { getEngine, useEngineLayers } from '@/hooks/useEngine';
 import { BLOCK_TYPES } from '@/lib/blocks';
-import { brushCells, cellsAlongStroke } from '@/lib/brush';
+import { brushCells, cellsAlongPath } from '@/lib/brush';
 import { transformCells } from '@/lib/artifacts/transform';
 
 /**
@@ -21,8 +21,7 @@ export function Cursor() {
   const hoverNormal = useUIStore((s) => s.hoverNormal);
   const brush = useUIStore((s) => s.brush);
   const activeBlock = useUIStore((s) => s.activeBlock);
-  const strokePreviewStart = useUIStore((s) => s.strokePreviewStart);
-  const strokePreviewEnd = useUIStore((s) => s.strokePreviewEnd);
+  const strokePreviewPath = useUIStore((s) => s.strokePreviewPath);
   const stampArtifact = useUIStore((s) => s.stampArtifact);
   const stampTransform = useUIStore((s) => s.stampTransform);
   const { activeLayer } = useEngineLayers();
@@ -79,8 +78,8 @@ export function Cursor() {
 
   const linePreview =
     brush.stroke === 'line' &&
-    strokePreviewStart &&
-    strokePreviewEnd &&
+    strokePreviewPath !== null &&
+    strokePreviewPath.length >= 2 &&
     brush.mode !== 'select' &&
     brush.mode !== 'eyedropper' &&
     !stampArtifact;
@@ -104,8 +103,8 @@ export function Cursor() {
     envelopeWireMat.color = c;
     circleRingMat.color = c;
   } else if (linePreview) {
-    cells = cellsAlongStroke(strokePreviewStart, strokePreviewEnd, brush, activeBlock);
-    envelopeCenter = strokePreviewEnd;
+    cells = cellsAlongPath(strokePreviewPath, brush, activeBlock);
+    envelopeCenter = strokePreviewPath[strokePreviewPath.length - 1];
   } else if (hoverCell) {
     const [cx, cy, cz] = hoverCell;
     const editingExisting =

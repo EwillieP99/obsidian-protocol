@@ -24,7 +24,9 @@ Use the same names as [features.md](features.md). Internal identifiers are in pa
 | Post-FX, particles, shake, audio | `PostFX.tsx`, `SceneEffects.tsx`, `hooks/useEffectBindings.ts`, `stores/effectsStore.ts` |
 | Quality presets (HIGH / BALANCED / PERFORMANCE) | `uiStore` settings |
 | Immersive Mode toggle | `uiStore.immersiveMode` (boolean, default `false`) |
-| Artifact Library / blueprints | `lib/artifacts.ts`, `lib/artifacts/prefabs.ts`, `ArtifactLibraryPanel.tsx`; `uiStore` `selectionStart/End`, `clipboard`, `stampArtifact` |
+| Artifact Library / blueprints | `lib/artifacts.ts`, `lib/artifacts/prefabs.ts`, `lib/artifacts/transform.ts`, `ArtifactLibraryPanel.tsx`; `uiStore` `selectionStart/End`, `clipboard`, `stampArtifact`, `stampTransform` |
+| glTF export | `lib/exporters/gltf.ts`, Toolbar IO group — read-only; no worker mutation |
+| Selection overlay | `components/scene/SelectionBox.tsx`, `components/ui/SelectionHud.tsx`, `lib/selection.ts` |
 
 ---
 
@@ -78,9 +80,15 @@ Toggling Immersive Mode UI (integrity meter, anomaly alert, contract toolbar but
   → ContractPanel is not gated by default (toolbar N button is)
 
 Adding Artifact Library feature / stamp / clipboard?
-  → lib/artifacts.ts, lib/artifacts/prefabs.ts, ArtifactLibraryPanel.tsx
-  → Interaction.tsx (select + stamp), useKeyboardShortcuts.ts, uiStore selection/clipboard/stamp
+  → lib/artifacts.ts, lib/artifacts/prefabs.ts, lib/artifacts/transform.ts, ArtifactLibraryPanel.tsx
+  → Interaction.tsx (select + stamp), Cursor.tsx (ghost), useKeyboardShortcuts.ts, uiStore selection/clipboard/stamp
   → All voxel mutations via getEngine().applyOps()
+
+Adding glTF export?
+  → lib/exporters/gltf.ts, Toolbar.tsx IO group — read-only snapshot path
+
+Adding selection visual feedback?
+  → components/scene/SelectionBox.tsx, components/ui/SelectionHud.tsx, lib/selection.ts
 
 Adding brush mode or shape?
   → types/index.ts (BrushMode / BrushShape if new enum value)
@@ -108,7 +116,7 @@ Matches [technical-architecture §7](technical-architecture.md#7-future-proofing
 
 1. `lib/blocks.ts` — add to `BLOCK_TYPES` (include `stability`, `anomaly`, `category`, optional `shader`, `transparent` for data-stream-like blocks).
 2. `BLOCK_ORDER` — palette order.
-3. **`BLOCK_INDEX_TABLE` — append only** at the end (after index 12 `glitch` today).
+3. **`BLOCK_INDEX_TABLE` — append only** at the end (current highest index: 16 = `carbon`; `glitch` is index 12 from the original V1 set).
 4. Optional shader — add GLSL exports to `shaders/index.ts`; register in `RenderBridge.ts` `buildShaderMaterial` (see [shaders.md](shaders.md)).
 5. No worker edit required — `blockIdToIndex` / `indexToBlockId` handle the wire mapping.
 
@@ -214,7 +222,7 @@ After any extension:
 
 ## Out of scope unless explicitly requested
 
-Roadmap items from features/README — **not built**: Liveblocks, WebXR, WebGPU renderer, greedy meshing, migrating pointer input to `engine.raycast()`. **Built:** glTF export (`lib/exporters/gltf.ts`), OBS2 persistence, Vitest smoke tests.
+Roadmap items from features/README — **not built**: Liveblocks, WebXR, WebGPU renderer, greedy meshing (B5 descoped), migrating pointer input to `engine.raycast()`. **Built:** glTF export (`lib/exporters/gltf.ts`), OBS2 persistence, Vitest smoke tests (19 tests), Playwright E2E smoke, CI (`.github/workflows/ci.yml`).
 
 - `Custom block colors / user-defined swatches (free-form hex → new paintable block)`
 
@@ -235,4 +243,4 @@ Until then, add curated presets by appending to `BLOCK_INDEX_TABLE` (see recipe 
 
 ---
 
-*Agent playbook — aligned with [features.md](features.md) and [technical-architecture.md](technical-architecture.md). Last updated: 2026-05-20.*
+*Agent playbook — aligned with [features.md](features.md) and [technical-architecture.md](technical-architecture.md). Last updated: 2026-05-22.*

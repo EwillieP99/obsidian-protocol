@@ -97,6 +97,36 @@ export function cellsAlongStroke(
   );
 }
 
+/**
+ * Union of brush footprints along a multi-segment polyline (deduped).
+ * Consecutive vertices are connected with `cellsAlongStroke`; shared corner
+ * cells collapse via the dedupe set so the join is seamless.
+ */
+export function cellsAlongPath(
+  vertices: Vec3[],
+  brush: Brush,
+  activeBlock?: BlockId,
+): Array<[number, number, number]> {
+  if (vertices.length === 0) return [];
+  if (vertices.length === 1) {
+    const [x, y, z] = vertices[0];
+    return brush.size === 0 ? [[x, y, z]] : brushCells(x, y, z, brush);
+  }
+
+  const seen = new Set<string>();
+  const out: Array<[number, number, number]> = [];
+  for (let i = 0; i < vertices.length - 1; i++) {
+    for (const cell of cellsAlongStroke(vertices[i], vertices[i + 1], brush, activeBlock)) {
+      const k = `${cell[0]},${cell[1]},${cell[2]}`;
+      if (!seen.has(k)) {
+        seen.add(k);
+        out.push(cell);
+      }
+    }
+  }
+  return out;
+}
+
 /** Generate the cells touched by a flat brush stamp centered on (cx,cy,cz). */
 export function brushCells(cx: number, cy: number, cz: number, brush: Brush): Array<[number, number, number]> {
   const r = brush.size;

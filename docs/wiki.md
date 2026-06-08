@@ -1,8 +1,8 @@
 # NEON NEXUS // Obsidian Protocol — Official Wiki
 
 **Version:** 0.1.0  
-**Status:** Active Development — V2 engine Phases 0–5 complete; Wave A product features (Studio/Immersive, Artifact Library) landing  
-**Last Updated:** May 21, 2026
+**Status:** Active Development — V2 engine complete; Wave A + Wave B (except greedy meshing) shipped; Wave D polish partial  
+**Last Updated:** May 22, 2026
 
 ---
 
@@ -31,7 +31,8 @@ This wiki contains everything you need to understand, play, and extend the syste
 - [V1 Autopsy](v1_autopsy.md) — what V2 was built to fix
 
 ### Project Status
-- [Project Plan](PROJECT_PLAN.md) — phase tracker, gaps, recommended next steps
+- [Project Plan](PROJECT_PLAN.md) — wave tracker, gaps, recommended next steps
+- [Deploy](deploy.md) — Vercel + CI + smoke checklist
 
 > **Doc TBD:** `shortcuts.md`, `cinematic-onboarding.md`, `state-management.md`
 > are referenced in older drafts but haven't been written yet. In-app shortcuts
@@ -46,25 +47,22 @@ brush strokes above ~800 voxels — see [V1 Autopsy](v1_autopsy.md). V2 moves
 voxel data into Web Workers and replaces the V1 full-rebuild render loop with
 a frame-coalesced GPU patcher (`RenderBridge`).
 
-**Phase tracker — Phases 0–5 complete; Wave B creative depth next:**
+**Phase tracker — Phases 0–5 complete; Wave A + Wave B shipped (`3f95ec0`):**
 
 | Phase | Commit | Status | What |
 |---|---|---|---|
 | 0–2 | `5f215f9` | ✅ | Engine scaffolding, worker stand-up, chunk model, wire protocol |
-| 3.1 | `2d42765` | ✅ | `RenderBridge` (SlotAllocator + 12 InstancedMesh × MAX_INSTANCES), worker re-INIT |
+| 3.1 | `2d42765` | ✅ | `RenderBridge` (SlotAllocator + 16 InstancedMesh × MAX_INSTANCES), worker re-INIT |
 | 3.2–3.4 | `2322016` | ✅ | Worker as mutation authority; `Voxels.tsx` thin wrapper; all sites call `engine.*` |
 | 3.5 | `8f7e9e8` | ✅ | `voxelStore` deleted; UI reads via `useEngine*` hooks |
 | 4 | `8f7e9e8` | ✅ | `raycast.worker` + `engine.raycast()` (pointer input still uses R3F) |
-| 5 | Wave A | ✅ | OBS2 binary saves via `compress.worker`; `lib/persistence.ts` writes ArrayBuffers with JSON fallback on load |
+| 5 | `3f95ec0` | ✅ | OBS2 binary saves via `compress.worker`; `lib/persistence.ts` ArrayBuffer I/O + JSON fallback |
 
-**Product focus (Wave A):** Studio mode (Immersive off by default), collapsible toolbar groups, Artifact Library (prefabs + region copy/paste + stamp), layer dominant-block swatches.
+**Product focus (Wave A + B):** Studio mode (Immersive off by default), collapsible toolbar groups, Artifact Library (18 prefabs + region copy/paste + stamp with rotate/mirror ghost), selection box + HUD, line-stroke brush, glTF export, settings presets (STUDIO / NEON / PERF / IMMERSIVE), HUD reskin (`CanvasHud`, `FirstRunHints`).
 
-**Validated:** Blackspire Arcology (~3,100 blocks) feel-test passed — paint/erase/undo smooth, no V1-style main-thread hitches (May 2026).
+**Quality:** Blackspire Arcology (~3,100 blocks) feel-test passed — paint/erase/undo smooth, no V1-style main-thread hitches. **19 Vitest tests** + Playwright smoke E2E in CI.
 
-**Next up:** Wave B creative tool depth — stamp polish, selection overlay, glTF export, Vitest tests (see [Project Plan](PROJECT_PLAN.md)). Deploy via Vercel using root `vercel.json`.
-
-The V1 cinematic onboarding work referenced in older drafts remains paused while
-the engine rebuild lands.
+**Next up:** Spike C agent research memo, Vercel production URL (D2), optional B5 greedy meshing spike, Liveblocks/WebXR/WebGPU remain roadmap-only. See [Project Plan](PROJECT_PLAN.md).
 
 ---
 

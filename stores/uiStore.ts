@@ -29,13 +29,10 @@ interface UIState {
   hoverNormal: [number, number, number] | null;
   setHover: (cell: [number, number, number] | null, normal: [number, number, number] | null) => void;
 
-  // Line-stroke preview (Interaction → Cursor)
-  strokePreviewStart: [number, number, number] | null;
-  strokePreviewEnd: [number, number, number] | null;
-  setStrokePreview: (
-    start: [number, number, number] | null,
-    end: [number, number, number] | null,
-  ) => void;
+  // Line-stroke preview (Interaction → Cursor). An ordered list of vertices:
+  // a single A→B line has 2, a corner-locked polyline has 3+.
+  strokePreviewPath: [number, number, number][] | null;
+  setStrokePreview: (path: [number, number, number][] | null) => void;
   clearStrokePreview: () => void;
 
   // Panels
@@ -175,10 +172,9 @@ export const useUIStore = create<UIState>((set, get) => ({
   hoverNormal: null,
   setHover: (cell, normal) => set({ hoverCell: cell, hoverNormal: normal }),
 
-  strokePreviewStart: null,
-  strokePreviewEnd: null,
-  setStrokePreview: (start, end) => set({ strokePreviewStart: start, strokePreviewEnd: end }),
-  clearStrokePreview: () => set({ strokePreviewStart: null, strokePreviewEnd: null }),
+  strokePreviewPath: null,
+  setStrokePreview: (path) => set({ strokePreviewPath: path }),
+  clearStrokePreview: () => set({ strokePreviewPath: null }),
 
   panels: {
     palette: true,

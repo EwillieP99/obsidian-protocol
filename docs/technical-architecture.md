@@ -6,7 +6,7 @@ This document provides a deep dive into the technical design of Obsidian Protoco
 
 ## 0. V1 → V2 Status
 
-> **Phase tracker — 2026-05-22 — Phases 0–5 complete; Wave A product features landed**
+> **Phase tracker — 2026-05-22 — Phases 0–5 complete; Wave A + Wave B shipped**
 >
 > | Phase | Commit | Status |
 > |---|---|---|
@@ -17,9 +17,11 @@ This document provides a deep dive into the technical design of Obsidian Protoco
 > | 3.2: Worker as true mutation authority; retire storeUnsub | `2322016` | ✅ Done |
 > | 3.5: Retire `voxelStore`; all UI reads through engine hooks | `8f7e9e8` | ✅ Done |
 > | 4: Dedicated raycast worker + `engine.raycast()` | `8f7e9e8` | ✅ Done (UI still uses R3F raycasting for pointer input) |
-> | 5: OBS2 binary persistence (compress worker) | — | ⏳ In progress — engine codec + compress worker wired; `lib/persistence.ts` flipping to binary I/O |
+> | 5: OBS2 binary persistence (compress worker) | `3f95ec0` | ✅ Done — engine codec + `lib/persistence.ts` binary I/O |
+> | Wave A: Studio/Immersive, Artifact Library, toolbar groups | `3f95ec0` | ✅ Done |
+> | Wave B: stamp polish, selection HUD, glTF, tests, 18 prefabs | `3f95ec0` | ✅ Done (B5 greedy meshing descoped) |
 
-**Current state:** `voxelStore` is **deleted**. All canonical voxel state lives in `voxel.worker.ts`. `VoxelEngine` spawns three workers (`voxel`, `raycast`, `compress`) and keeps main-thread caches for sync reads. Six reactive hooks replace all former `useVoxelStore` selectors. **Studio mode** (default) hides Immersive HUD elements via `uiStore.immersiveMode`. **Artifact Library** (`lib/artifacts.ts`) adds prefab stamp + region clipboard. `uiStore` and `effectsStore` are unchanged.
+**Current state:** `voxelStore` is **deleted**. All canonical voxel state lives in `voxel.worker.ts`. `VoxelEngine` spawns three workers (`voxel`, `raycast`, `compress`) and keeps main-thread caches for sync reads. Six reactive hooks replace all former `useVoxelStore` selectors. **Studio mode** (default) hides Immersive HUD elements via `uiStore.immersiveMode`. **Artifact Library** (`lib/artifacts.ts`) provides prefab stamp + region clipboard + stamp transform (rotate/mirror). **16 block types** across 5 categories. CI runs typecheck, lint, Vitest (19 tests), and build on every push.
 
 V2's full mandate:
 
@@ -39,7 +41,7 @@ V2's full mandate:
 | Post-processing    | @react-three/postprocessing        | Bloom, Glitch, Chromatic Aberration, etc. |
 | State Management   | Zustand + subscribeWithSelector    | UI + effects only; voxel state lives in engine worker |
 | Styling            | Tailwind CSS + Framer Motion       | Cyberpunk neon UI |
-| Persistence        | idb-keyval (IndexedDB) + OBS2      | Autosave + named saves (binary OBS2 in flight; JSON fallback on load) |
+| Persistence        | idb-keyval (IndexedDB) + OBS2      | Autosave + named saves (binary OBS2 primary; JSON fallback on load) |
 | Audio              | Web Audio API (synthesized)        | No asset dependency |
 | Fonts              | Inter + Share Tech Mono            | Terminal + clean sans |
 | Types              | TypeScript (strict)                | Full type safety |
@@ -74,7 +76,7 @@ components/
 engine/                 # V2 ENGINE — zero React imports. Black box.
 ├── bridge/
 │   ├── WorkerProtocol.ts  # Typed message contracts for all 3 workers
-│   └── RenderBridge.ts    # SlotAllocator + 12 pre-allocated InstancedMesh
+│   └── RenderBridge.ts    # SlotAllocator + 16 pre-allocated InstancedMesh (one per block type)
 ├── chunks/
 │   └── Chunk.ts        # Uint16Array[4096] chunk (8 KB), 16³, count cache
 ├── core/
@@ -95,7 +97,7 @@ stores/
 └── effectsStore.ts     # Particles, shake, bloom flash, focus. Unchanged.
 
 lib/
-├── blocks.ts           # 12 block definitions + BLOCK_INDEX_TABLE (V2 wire)
+├── blocks.ts           # 16 block definitions + BLOCK_INDEX_TABLE (V2 wire; append-only)
 ├── constants.ts        # World params + V2 chunk constants
 ├── brush.ts            # Brush shape logic (main-thread preview; unchanged)
 ├── persistence.ts      # IndexedDB save/load via engine.serialize() / loadSave() (OBS2 + JSON sniff)
@@ -134,7 +136,7 @@ shaders/                # Custom GLSL (6 block types with shaders)
   - `useFrame` → `bridge.flushPending()` + `sharedUniforms.uTime.value` update
   - Renders `bridge.renderableMeshes` via `<primitive object={mesh} />`
 
-- `RenderBridge` pre-allocates 12 `InstancedMesh` at `MAX_INSTANCES=16384` each. A `SlotAllocator` maps `cellLinearIdx → instanceSlot` with O(1) alloc/free. GPU buffers never grow mid-session.
+- `RenderBridge` pre-allocates 16 `InstancedMesh` at `MAX_INSTANCES=16384` each (one per non-air `BLOCK_INDEX_TABLE` entry). A `SlotAllocator` maps `cellLinearIdx → instanceSlot` with O(1) alloc/free. GPU buffers never grow mid-session.
 
 - All mutations (`applyOps`, `undo`, `redo`, `clearAll`, `loadSave`, layer ops) post directly to `voxel.worker.ts`. Worker `PATCH/STATS/CHRONO/LAYERS` replies drive the engine event bus. `VoxelEngine` keeps main-thread caches for sync reads (`getBlock`, `getStats`, `getLayers`, etc.).
 
@@ -179,7 +181,7 @@ Located in `lib/brush.ts`:
 - **Frame-coalesced GPU writes (✅):** Multiple worker `PATCH` bursts between frames apply in a single `flushPending()` pass. `instanceMatrix.needsUpdate` fires at most once per dirty mesh per frame.
 - **O(1) slot allocation (✅):** `SlotAllocator` uses `Map<cellIdx, slot>` + free-list LIFO. No per-frame scans.
 - **Incremental stats counters (✅):** `cellCount / sumStability / sumAnomaly` update inside the worker on every cell write. `computeStats()` is O(1) regardless of world size. Stats tick at 200 ms.
-- **Pre-allocated GPU buffers (✅):** 12 × `MAX_INSTANCES=16384` × 64 B = ~12 MB; no reallocation mid-session.
+- **Pre-allocated GPU buffers (✅):** 16 × `MAX_INSTANCES=16384` × 64 B ≈ 16 MB; no reallocation mid-session.
 - **Web Worker offload (✅):** Brush chunk writes, undo/redo deltas, integrity computation all happen in `voxel.worker.ts` off the main thread. No long tasks from voxel mutations in Chrome DevTools Performance.
 - **Zero-copy worker I/O (✅ partial):** Occupancy deltas, OBS2 chunk buffers, and serialized saves cross worker boundaries as transferable `ArrayBuffer`s; no COOP/COEP headers required. `LOADED_CHUNKS` zero-copy load path is reserved but not wired yet.
 
@@ -221,9 +223,9 @@ engine 'patch' event
 
 ## 5. Data Model
 
-**BlockId** (12 types):
-- Structure: `obsidian`, `chrome`, `corp-glass`
-- Neon: `neon-cyan`, `neon-magenta`
+**BlockId** (16 types):
+- Structure: `obsidian`, `chrome`, `carbon`, `corp-glass`
+- Neon: `neon-cyan`, `neon-magenta`, `neon-amber`, `neon-lime`, `neon-violet`
 - Energy: `toxic-core`, `power-line`
 - Data: `data-stream`, `holo-billboard`, `circuit`, `neural-node`
 - Anomaly: `glitch`
@@ -250,7 +252,7 @@ Chunk identity: key is `"cx,cy,cz"` (signed int16). Local index: `(y_local << 8)
 
 V1 was a 1-hour Claude Code build. Its design choices that V2 **preserved**:
 
-- **One `InstancedMesh` per BlockId** (12 total) — V2 keeps this geometry but moves slot management into `SlotAllocator`.
+- **One `InstancedMesh` per BlockId** (16 total) — V2 keeps this geometry but moves slot management into `SlotAllocator`.
 - **Per-cell opacity via `instanceColor` grayscale** — V2 keeps this trick; rebake runs from `RenderBridge.setLayers()`.
 - **Shared `uTime` uniform** across all shader materials — same module-level const in `Voxels.tsx`.
 - **Custom `boundingSphere`** on geometry for world-spanning frustum culling — identical trick in `RenderBridge`.
@@ -275,8 +277,16 @@ What V2 **changed**:
 | `components/ui/ContractPanel.tsx` | `contract` from voxelStore | ✅ `useEngineContract()` (Phase 3.5) |
 | `hooks/useEffectBindings.ts` | voxelStore revision subscription → particles/audio | ✅ engine `'patch'` event subscription (Phase 3.5) |
 | `lib/persistence.ts` | `buildSerialized` read from voxelStore | ✅ `engine.serialize()` / `loadSave()` — OBS2 binary I/O (Phase 5) |
-| `lib/artifacts.ts` | — | ✅ Artifact Library + clipboard/stamp (Wave A) |
+| `lib/artifacts.ts` | — | ✅ Artifact Library + clipboard/stamp + transform (Wave A/B) |
+| `lib/artifacts/transform.ts` | — | ✅ Stamp rotate/mirror (Wave B1) |
+| `lib/exporters/gltf.ts` | — | ✅ glTF/GLB vault export (Wave B4) |
+| `lib/selection.ts` | — | ✅ Selection AABB helpers (Wave B2) |
+| `lib/settingsPresets.ts` | — | ✅ STUDIO/NEON/PERF/IMMERSIVE bundles (reskin) |
 | `components/ui/ArtifactLibraryPanel.tsx` | — | ✅ Prefab/blueprint panel (Wave A) |
+| `components/scene/SelectionBox.tsx` | — | ✅ 3D selection overlay (Wave B2) |
+| `components/ui/SelectionHud.tsx` | — | ✅ Selection dimensions HUD (Wave B2) |
+| `components/ui/CanvasHud.tsx` | — | ✅ Viewport HUD gizmo (Wave D partial) |
+| `components/ui/FirstRunHints.tsx` | — | ✅ First-run Studio hints (Wave D partial) |
 | `lib/contracts.ts` | `applyContract` clear via `store.cells` | ✅ `engine.getAllCells()` (Phase 3.5) |
 | `lib/blocks.ts` | Block definitions + stats | Extended with `BLOCK_INDEX_TABLE` for V2 wire format |
 | `lib/brush.ts` | Brush shape + operation generation | Unchanged — still used for preview + pre-engine op expansion |
@@ -291,4 +301,4 @@ What V2 **changed**:
 
 ---
 
-*Last updated: 2026-05-21. Phases 0–5 complete; Wave A product features landing.*
+*Last updated: 2026-05-22. Phases 0–5 complete; Wave A + Wave B (except greedy meshing) shipped in `3f95ec0`.*

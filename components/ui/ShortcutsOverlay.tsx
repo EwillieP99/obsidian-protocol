@@ -21,6 +21,7 @@ const GROUPS: Array<{ title: string; rows: Shortcut[] }> = [
       { combo: 'X', action: 'Select region (click two corners)' },
       { combo: '[ / ]', action: 'Decrease / increase brush size' },
       { combo: 'Shift + drag', action: 'Freehand: lock stroke to dominant axis' },
+      { combo: 'Shift / Ctrl (line)', action: 'Tap mid-drag to lock a corner & turn — trace rectangles' },
     ],
   },
   {

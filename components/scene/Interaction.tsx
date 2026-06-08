@@ -6,7 +6,7 @@ import { ThreeEvent } from '@react-three/fiber';
 import { useUIStore } from '@/stores/uiStore';
 import { useEffectsStore } from '@/stores/effectsStore';
 import { getEngine, useEngineLayers } from '@/hooks/useEngine';
-import { brushCells, cellsAlongStroke, operationsForBrush } from '@/lib/brush';
+import { brushCells, cellsAlongPath, operationsForBrush } from '@/lib/brush';
 import { WORLD_SIZE, WORLD_HEIGHT, FLOOR_Y, HALF } from '@/lib/constants';
 import type { BrushMode } from '@/types';
 import { toast } from 'sonner';
@@ -66,6 +66,9 @@ export function Interaction({ children }: { children: React.ReactNode }) {
   const lastCell = useRef<[number, number, number] | null>(null);
   const strokeStart = useRef<[number, number, number] | null>(null);
   const freehandCells = useRef<Array<[number, number, number]>>([]);
+  // Committed corners of an in-progress line. [start] for a plain line; each
+  // Shift/Ctrl tap appends the locked corner so subsequent segments turn from it.
+  const lineVertices = useRef<Array<[number, number, number]>>([]);
 
   const { activeLayer, layers } = useEngineLayers();
   const layersPanelOpen = useUIStore((s) => s.panels.layers);
@@ -216,9 +219,15 @@ export function Interaction({ children }: { children: React.ReactNode }) {
 
     if (isDown.current && brush.mode !== 'eyedropper') {
       if (brush.stroke === 'line') {
-        if (strokeStart.current) {
-          lastCell.current = target;
-          useUIStore.getState().setStrokePreview(strokeStart.current, target);
+        const verts = lineVertices.current;
+        if (verts.length > 0) {
+          const anchor = verts[verts.length - 1];
+          // Once a corner is locked we're drawing right angles, so snap the
+          // live segment to the dominant axis. The first, un-cornered segment
+          // stays free (diagonals allowed).
+          const liveEnd = verts.length >= 2 ? constrainToAxis(anchor, target) : target;
+          lastCell.current = liveEnd;
+          useUIStore.getState().setStrokePreview([...verts, liveEnd]);
         }
       } else {
         const k = `${target[0]},${target[1]},${target[2]}`;
@@ -291,9 +300,11 @@ export function Interaction({ children }: { children: React.ReactNode }) {
 
     if (brush.stroke === 'line') {
       strokeStart.current = target;
-      useUIStore.getState().setStrokePreview(target, target);
+      lineVertices.current = [target];
+      useUIStore.getState().setStrokePreview([target, target]);
     } else {
       strokeStart.current = null;
+      lineVertices.current = [];
       useUIStore.getState().clearStrokePreview();
       collectFreehandCell(target);
     }
@@ -306,8 +317,11 @@ export function Interaction({ children }: { children: React.ReactNode }) {
 
     if (brush.stroke === 'line' && strokeStart.current && brush.mode !== 'eyedropper' && brush.mode !== 'select') {
       const end = lastCell.current ?? strokeStart.current;
-      const cells = cellsAlongStroke(strokeStart.current, end, brush, activeBlock);
-      applyCells(cells, 'Line stroke');
+      const path = lineVertices.current.length > 0
+        ? [...lineVertices.current, end]
+        : [strokeStart.current, end];
+      const cells = cellsAlongPath(path, brush, activeBlock);
+      applyCells(cells, lineVertices.current.length >= 2 ? 'Polyline' : 'Line stroke');
     } else if (brush.stroke === 'freehand' && freehandCells.current.length > 0) {
       applyCells(freehandCells.current);
     }
@@ -316,6 +330,7 @@ export function Interaction({ children }: { children: React.ReactNode }) {
     lastCell.current = null;
     strokeStart.current = null;
     freehandCells.current = [];
+    lineVertices.current = [];
     useUIStore.getState().clearStrokePreview();
   }, [applyCells]);
 
@@ -324,6 +339,37 @@ export function Interaction({ children }: { children: React.ReactNode }) {
     window.addEventListener('pointerup', onWindowPointerUp);
     return () => window.removeEventListener('pointerup', onWindowPointerUp);
   }, [finishStroke]);
+
+  // Shift/Ctrl while dragging a line locks the current endpoint as a corner and
+  // turns the next segment from it — letting you trace rectangles, L- and
+  // U-shapes in one stroke. `e.repeat` guards against auto-repeat so a held key
+  // commits exactly one corner.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      if (e.key !== 'Shift' && e.key !== 'Control') return;
+      if (!isDown.current) return;
+
+      const { brush } = useUIStore.getState();
+      if (brush.stroke !== 'line' || brush.mode === 'eyedropper' || brush.mode === 'select') return;
+
+      const verts = lineVertices.current;
+      const anchor = verts[verts.length - 1];
+      const cursor = lastCell.current;
+      if (!anchor || !cursor) return;
+
+      const corner = constrainToAxis(anchor, cursor);
+      // Ignore taps that haven't moved off the anchor — no zero-length corner.
+      if (corner[0] === anchor[0] && corner[1] === anchor[1] && corner[2] === anchor[2]) return;
+
+      verts.push(corner);
+      strokeStart.current = corner;
+      lastCell.current = corner;
+      useUIStore.getState().setStrokePreview([...verts]);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   const handlePointerUp = useCallback((e: ThreeEvent<PointerEvent>) => {
     if (e.button === 2) return;

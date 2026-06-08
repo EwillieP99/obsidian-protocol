@@ -10,8 +10,10 @@ Obsidian Protocol opens as a free-form 3D voxel builder. The hero features are:
 
 - **16-block palette** with unique emissive behaviors and animated GLSL shaders
 - **Multi-layer editing** — 12 vertical layers with visibility, lock, solo, and opacity controls
-- **Brush system** — 6 modes × 2 flat shapes with live 3D preview
-- **Artifact Library** — prefab stamps, region select, copy/paste (Ctrl+C/V), save selections to library
+- **Brush system** — 6 modes × 2 flat shapes × 2 strokes (freehand + line) with live 3D preview
+- **Artifact Library** — 18 prefab stamps, region select, copy/paste (Ctrl+C/V), glTF export, save selections to library
+- **Viewport HUD** — `CanvasHud` gizmo (camera, zoom, active block/layer readout) + collapsible toolbar groups
+- **First-run hints** — dismissible Studio tips on first load (`FirstRunHints`)
 - **Full undo/redo** with a visual chrono-log timeline
 - **Persistence** — autosave, named slots, import/export (`.obs2` / `.json`)
 
@@ -53,10 +55,12 @@ Each block has unique stability, anomaly rating, emissive behavior, and (for 6 o
 
 ## Artifact Library
 
-- **Prefab stamps** — shipped prefabs in `lib/artifacts/prefabs.ts`; stamp from the Artifact Library panel (`A`)
-- **Region select** — Select mode (`X`) → drag two corners to define an AABB
+- **Prefab stamps** — 18 shipped prefabs in `lib/artifacts/prefabs.ts`; stamp from the Artifact Library panel (`A`)
+- **Stamp transform** — while stamping: **R** rotates 90°, **M** mirrors on X; ghost preview follows cursor (`Cursor.tsx`)
+- **Region select** — Select mode (`X`) → drag two corners to define an AABB; **3D selection box** + compact **Selection HUD** show dimensions and block count
 - **Copy / paste** — Ctrl+C copies selection to clipboard; Ctrl+V pastes at cursor
 - **Save to library** — toolbar bookmark button saves current selection as a reusable blueprint
+- **glTF export** — Toolbar IO group exports the current vault as `.glb` (`lib/exporters/gltf.ts`)
 - All voxel changes route through `getEngine().applyOps()` — undo/redo via chrono-log
 
 ---
@@ -145,4 +149,4 @@ When disabled (Studio mode), integrity meter, anomaly toasts, and the contract *
 
 ---
 
-*Last updated: 2026-05-21.*
+*Last updated: 2026-05-22.*
