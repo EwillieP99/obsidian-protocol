@@ -7,7 +7,7 @@
 
 **Constraint source of truth:** [docs/how-to-extend.md](how-to-extend.md) — read before every ticket.
 
-**Current snapshot (2026-05-22):** Commit `3f95ec0` on `master` — V2 Phases 0–5, Wave A, most of Wave B, partial Wave D, HUD reskin, CI, Vitest (19 tests), Playwright smoke E2E. **Not done:** B5 greedy meshing (descoped), Spike C memo, production Vercel URL in docs.
+**Current snapshot (2026-06-08):** `master` — V2 Phases 0–5, Wave A, most of Wave B, partial Wave D, HUD reskin, CI, Vitest (19 tests), Playwright smoke E2E, corner-locked polyline brush, and **Spike C memo written** ([docs/agents-research.md](agents-research.md)). **Not done:** B5 greedy meshing (descoped), C1→Wave E agent *code*, production Vercel URL in docs.
 
 ---
 
@@ -98,7 +98,7 @@ Each ticket moves through explicit states. Humans review before merge.
 | Wave B — Vitest + Playwright | 8 test files (19 Vitest), `e2e/smoke.spec.ts` | ✅ B6 |
 | Wave D — partial polish | `FirstRunHints.tsx`, `CanvasHud.tsx`, `StatusBar.tsx`, HUD reskin (`globals.css`) | ✅ Partial D1/D3 |
 | Wave D — Vercel deploy URL | `vercel.json`, `docs/deploy.md` | ⏳ D2 — config ready; no pinned prod URL in repo |
-| Spike C — agent research memo | `docs/agents-research.md` | ⏳ C1 not written |
+| Spike C — agent research memo | `docs/agents-research.md` | ✅ C1 written (2026-06-08) — NL→voxel agent spec, grounded against engine |
 | Brush depth — line stroke, smart connect | `lib/brush.ts`, `Interaction.tsx`, `types/index.ts` | ✅ Shipped with Wave B commit |
 | Settings presets + persistence | `lib/settingsPresets.ts`, `lib/settingsPersistence.ts` | ✅ Shipped with reskin |
 
@@ -110,7 +110,7 @@ Each ticket moves through explicit states. Humans review before merge.
 | `ContractPanel` not immersive-gated | Only Toolbar contract button respects `immersiveMode` | A2 optional follow-up |
 | Greedy meshing | No `uiStore.quality.greedyMesh` flag — B5 descoped after Wave B landing | Future spike |
 | Raycast worker unused for input | `Interaction.tsx` uses R3F — by design until profiled | Out of scope |
-| Agent integration | No `docs/agents-research.md` yet | C1 |
+| Agent integration | Research memo done (`docs/agents-research.md`); no code until Wave E | C1 ✅ → Wave E |
 | Production deploy URL | Vercel config present; preview/prod URL not checked into docs | D2 |
 
 ---
@@ -135,7 +135,7 @@ flowchart TB
 |------|------|-----------|--------|
 | **A** | Clean tree, push to origin, docs match code | No — sequential A1→A6 | ✅ Complete (`3f95ec0`) |
 | **B** | Artifact Library + Studio depth | Yes — B1–B6 in worktrees | ✅ B1–B4, B6 done; B5 descoped |
-| **C** | AI agent research memo only | No code | ⏳ C1 pending |
+| **C** | AI agent research memo only | No code | ✅ C1 written → Wave E |
 | **D** | Demo / deploy / polish | After B | 🔶 Partial — HUD/onboarding polish landed; D2 URL TBD |
 
 ---
@@ -643,7 +643,7 @@ Defer unless a dedicated future ticket explicitly requests them:
 | [docs/features.md](features.md) | Product features + brush system |
 | [docs/shaders.md](shaders.md) | GLSL blocks |
 | [docs/deploy.md](deploy.md) | Vercel deploy + CI |
-| [docs/agents-research.md](agents-research.md) | Spike C deliverable (C1 — not yet written) |
+| [docs/agents-research.md](agents-research.md) | Spike C deliverable (C1 ✅) — NL→voxel agent spec |
 | [README.md](../README.md) | User-facing setup + features |
 
 ---
